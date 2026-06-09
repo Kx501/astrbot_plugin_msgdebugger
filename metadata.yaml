@@ -4,4 +4,4 @@ version: "1.0.0"
 author: "Kx501"
 desc: 复读用户消息，调试被动回复与主动推送的出站处理链路。
 repo: "https://github.com/Kx501/astrbot_plugin_msgdebugger"
-tags: ["调试,开发"]
+tags: ["调试","开发"]
