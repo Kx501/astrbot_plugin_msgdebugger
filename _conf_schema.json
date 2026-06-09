@@ -1,0 +1,30 @@
+{
+  "send_mode": {
+    "description": "发送方式",
+    "type": "string",
+    "default": "passive",
+    "options": ["passive", "proactive"],
+    "labels": ["被动回复", "主动推送"],
+    "hint": "被动：yield 回复，走 on_decorating_result 等出站钩子。主动：context.send_message，走出站补丁路径。"
+  },
+  "echo_content": {
+    "description": "复读内容",
+    "type": "string",
+    "default": "plain",
+    "options": ["plain", "chain"],
+    "labels": ["纯文本", "完整消息链"],
+    "hint": "纯文本仅复读 message_str；完整消息链保留图片、At 等段。"
+  },
+  "group_whitelist": {
+    "description": "群白名单",
+    "type": "list",
+    "default": [],
+    "hint": "留空不限制；填写后仅在对应群内复读。私聊不受此项限制。"
+  },
+  "user_whitelist": {
+    "description": "用户白名单",
+    "type": "list",
+    "default": [],
+    "hint": "留空不限制；填写后仅复读对应用户的消息。"
+  }
+}
