@@ -33,8 +33,31 @@ def _passes_whitelist(event: AstrMessageEvent, group_wl: set[str], user_wl: set[
     return group_id in group_wl
 
 
-def _should_skip(event: AstrMessageEvent, cfg: AstrBotConfig) -> bool:
+def _wake_prefixes(context: Context, event: AstrMessageEvent) -> list[str]:
+    cfg = context.get_config(umo=event.unified_msg_origin)
+    raw = cfg.get("wake_prefix") or ["/"]
+    if isinstance(raw, str):
+        return [raw]
+    if isinstance(raw, list):
+        return [str(p) for p in raw if str(p)]
+    return ["/"]
+
+
+def _is_wake_command(event: AstrMessageEvent, context: Context) -> bool:
+    msg_obj = event.message_obj
+    raw = ((msg_obj.message_str if msg_obj else None) or "").strip()
+    if not raw:
+        return False
+    for prefix in _wake_prefixes(context, event):
+        if raw.startswith(prefix):
+            return True
+    return False
+
+
+def _should_skip(event: AstrMessageEvent, cfg: AstrBotConfig, context: Context) -> bool:
     if str(event.get_sender_id()) == str(event.get_self_id()):
+        return True
+    if _is_wake_command(event, context):
         return True
     group_wl = _as_str_set(cfg.get("group_whitelist"))
     user_wl = _as_str_set(cfg.get("user_whitelist"))
@@ -66,7 +89,9 @@ class MsgDebuggerStar(Star):
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_passive_echo(self, event: AstrMessageEvent):
         """被动回复：yield 结果，经 ResultDecorate -> Respond 出站。"""
-        if _send_mode(self.cfg) != _SEND_PASSIVE or _should_skip(event, self.cfg):
+        if _send_mode(self.cfg) != _SEND_PASSIVE or _should_skip(
+            event, self.cfg, self.context
+        ):
             return
 
         chain = _build_chain(event, _echo_content(self.cfg))
@@ -83,7 +108,9 @@ class MsgDebuggerStar(Star):
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_proactive_echo(self, event: AstrMessageEvent) -> None:
         """主动推送：context.send_message，不经被动回复管线。"""
-        if _send_mode(self.cfg) != _SEND_PROACTIVE or _should_skip(event, self.cfg):
+        if _send_mode(self.cfg) != _SEND_PROACTIVE or _should_skip(
+            event, self.cfg, self.context
+        ):
             return
 
         chain = _build_chain(event, _echo_content(self.cfg))
