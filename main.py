@@ -11,6 +11,9 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star
 
+_SEND_PASSIVE = "passive"
+_SEND_PROACTIVE = "proactive"
+
 
 def _as_str_set(values: Any) -> set[str]:
     if not isinstance(values, list):
@@ -38,60 +41,61 @@ def _should_skip(event: AstrMessageEvent, cfg: AstrBotConfig) -> bool:
     return not _passes_whitelist(event, group_wl, user_wl)
 
 
+def _send_mode(cfg: AstrBotConfig) -> str:
+    mode = str(cfg.get("send_mode") or _SEND_PASSIVE).strip().lower()
+    return mode if mode in {_SEND_PASSIVE, _SEND_PROACTIVE} else _SEND_PASSIVE
+
+
+def _echo_content(cfg: AstrBotConfig) -> str:
+    content = str(cfg.get("echo_content") or "plain").strip().lower()
+    return content if content in {"plain", "chain"} else "plain"
+
+
+def _build_chain(event: AstrMessageEvent, content_mode: str) -> list[Any]:
+    if content_mode == "plain":
+        text = event.message_str or ""
+        return [Comp.Plain(text)] if text else []
+    return copy.deepcopy(event.get_messages())
+
+
 class MsgDebuggerStar(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
         self.cfg = config
 
-    def _send_mode(self) -> str:
-        mode = str(self.cfg.get("send_mode") or "passive").strip().lower()
-        return mode if mode in {"passive", "proactive"} else "passive"
-
-    def _echo_content(self) -> str:
-        content = str(self.cfg.get("echo_content") or "plain").strip().lower()
-        return content if content in {"plain", "chain"} else "plain"
-
-    async def _send_proactive(self, event: AstrMessageEvent, chain: list[Any]) -> None:
-        await self.context.send_message(event.unified_msg_origin, MessageChain(chain))
-
     @filter.event_message_type(filter.EventMessageType.ALL)
-    async def on_message(self, event: AstrMessageEvent) -> None:
-        """收到用户消息后按配置复读，用于调试主被动出站路径。"""
-        if _should_skip(event, self.cfg):
+    async def on_passive_echo(self, event: AstrMessageEvent):
+        """被动回复：yield 结果，经 ResultDecorate -> Respond 出站。"""
+        if _send_mode(self.cfg) != _SEND_PASSIVE or _should_skip(event, self.cfg):
             return
 
-        mode = self._send_mode()
-        content_mode = self._echo_content()
-
-        if mode == "proactive":
-            chain = (
-                [Comp.Plain(event.message_str or "")]
-                if content_mode == "plain"
-                else copy.deepcopy(event.get_messages())
-            )
-            if not chain:
-                return
-            logger.debug(
-                "MsgDebugger: proactive echo umo=%s content=%s",
-                event.unified_msg_origin,
-                content_mode,
-            )
-            await self._send_proactive(event, chain)
+        chain = _build_chain(event, _echo_content(self.cfg))
+        if not chain:
             return
 
         logger.debug(
             "MsgDebugger: passive echo umo=%s content=%s",
             event.unified_msg_origin,
-            content_mode,
+            _echo_content(self.cfg),
         )
-        if content_mode == "chain":
-            chain = copy.deepcopy(event.get_messages())
-            if not chain:
-                return
-            yield event.chain_result(chain)
+        yield event.chain_result(chain)
+
+    @filter.event_message_type(filter.EventMessageType.ALL)
+    async def on_proactive_echo(self, event: AstrMessageEvent) -> None:
+        """主动推送：context.send_message，不经被动回复管线。"""
+        if _send_mode(self.cfg) != _SEND_PROACTIVE or _should_skip(event, self.cfg):
             return
 
-        text = event.message_str or ""
-        if not text:
+        chain = _build_chain(event, _echo_content(self.cfg))
+        if not chain:
             return
-        yield event.plain_result(text)
+
+        logger.debug(
+            "MsgDebugger: proactive echo umo=%s content=%s",
+            event.unified_msg_origin,
+            _echo_content(self.cfg),
+        )
+        await self.context.send_message(
+            event.unified_msg_origin,
+            MessageChain(chain),
+        )
