@@ -10,8 +10,11 @@
 ## 查看日志
 
 1. 启用插件，确保 `trace_enabled` 为真（默认开启）。
-2. 打开 AstrBot WebUI → 插件 → MsgDebugger → 打开 Page **`logs`**。
-3. 发消息或触发 LLM 对话，页面每 3 秒自动刷新（可关）。
+2. **重载插件**（首次添加 `pages/logs/` 后必须重载）。
+3. 打开 AstrBot WebUI → 插件 → MsgDebugger → 打开 Page **`logs`**。
+4. 发消息或触发 LLM 对话，页面每 3 秒自动刷新（可关）。
+
+> 日志 Page 需要 AstrBot **>= 4.24.2**（Plugin Pages / `register_web_api`）。若加载失败，请确认 AstrBot 版本并重载插件。
 
 页内可切换：
 

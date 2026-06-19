@@ -11,8 +11,8 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star
-from astrbot.api.web import json_response
 
+from .core.page_api import register_trace_page_routes
 from .core.trace_store import (
     TraceStore,
     build_decorating_fields,
@@ -110,18 +110,17 @@ class MsgDebuggerStar(Star):
         super().__init__(context)
         self.cfg = config
         self._sync_store_limit()
-        context.register_web_api(
-            f"/{PLUGIN_NAME}/traces",
-            self.api_list_traces,
-            ["GET"],
-            "List pipeline traces",
-        )
-        context.register_web_api(
-            f"/{PLUGIN_NAME}/traces/clear",
-            self.api_clear_traces,
-            ["POST"],
-            "Clear pipeline traces",
-        )
+        self._register_page_api()
+
+    def _register_page_api(self) -> None:
+        if not hasattr(self.context, "register_web_api"):
+            logger.warning("MsgDebugger: 当前 AstrBot 不支持 register_web_api，日志 Page 不可用")
+            return
+        try:
+            if register_trace_page_routes(self.context, _TRACE_STORE):
+                logger.info("MsgDebugger: 已注册 logs 页面 API")
+        except Exception:
+            logger.exception("MsgDebugger: 注册 logs 页面 API 失败")
 
     def _trace_enabled(self) -> bool:
         return bool(self.cfg.get("trace_enabled", True))
@@ -157,13 +156,6 @@ class MsgDebuggerStar(Star):
         trace_id = _TRACE_STORE.ensure_trace_id(event)
         _TRACE_STORE.begin_trace(trace_id, self._trace_meta(event))
         _TRACE_STORE.add_stage(trace_id, stage, fields)
-
-    async def api_list_traces(self):
-        return json_response({"traces": _TRACE_STORE.list_traces()})
-
-    async def api_clear_traces(self):
-        _TRACE_STORE.clear()
-        return json_response({"cleared": True})
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_trace_inbound(self, event: AstrMessageEvent) -> None:

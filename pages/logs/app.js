@@ -299,14 +299,20 @@ function escapeHtml(text) {
     .replaceAll(">", "&gt;");
 }
 
+async function apiGet(path) {
+  const res = await bridge.apiGet(path);
+  if (res && res.status === "ok" && res.data !== undefined) return res.data;
+  return res || {};
+}
+
 async function fetchTraces() {
-  const data = await bridge.apiGet("traces");
+  const data = await apiGet("page/traces");
   lastData = data.traces || [];
   renderTraces(lastData);
 }
 
 async function clearTraces() {
-  await bridge.apiPost("traces/clear", {});
+  await bridge.apiPost("page/traces/clear", {});
   lastData = [];
   renderTraces([]);
 }
