@@ -10,6 +10,7 @@
     <header class="toolbar">
       <div class="toolbar-left">
         <h1>管线日志</h1>
+        <div id="presetRow" class="preset-row"></div>
         <span id="runtimeBadge" class="runtime-badge"></span>
       </div>
       <div class="toolbar-actions">
@@ -23,28 +24,26 @@
         </label>
         <button type="button" id="btnRefresh">刷新</button>
         <button type="button" id="btnClear" class="danger">清空</button>
-        <button type="button" id="btnToggleFilters" class="ghost">筛选</button>
+        <button type="button" id="btnToggleFilters" class="ghost">筛选 ▾</button>
       </div>
     </header>
 
-    <section id="filterPanel" class="panel filters-panel" hidden>
+    <section id="filterPanel" class="panel filters-panel">
       <div class="filter-group">
-        <span class="filter-title">视图</span>
-        <div id="presetRow" class="preset-row"></div>
-      </div>
-      <div class="filter-group">
-        <span class="filter-title">阶段</span>
+        <div class="filter-title">阶段</div>
         <div id="stageToggles" class="toggle-row"></div>
       </div>
-      <div class="filter-group advanced-filters">
-        <span class="filter-title">字段</span>
+      <div class="filter-group">
+        <div class="filter-title">字段</div>
         <div id="fieldToggles" class="toggle-row"></div>
       </div>
       <div class="filter-group">
-        <span class="filter-title">选项</span>
-        <label class="inline"><input type="checkbox" id="optDiff" /> 高亮差异</label>
-        <label class="inline"><input type="checkbox" id="optCollapse" checked /> 折叠长文本</label>
-        <input type="text" id="umoFilter" placeholder="过滤 umo / 发送者…" />
+        <div class="filter-title">选项</div>
+        <div class="filter-options">
+          <label class="inline"><input type="checkbox" id="optDiff" /> 高亮差异</label>
+          <label class="inline"><input type="checkbox" id="optCollapse" checked /> 折叠长文本</label>
+          <input type="text" id="umoFilter" placeholder="过滤 umo / 发送者…" />
+        </div>
       </div>
     </section>
 

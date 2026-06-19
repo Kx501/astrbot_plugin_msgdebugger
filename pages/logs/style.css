@@ -94,29 +94,46 @@ button.ghost {
 .panel.filters-panel {
   margin: 0 8px 8px;
   padding: 10px 12px;
+  display: none;
 }
 
-.panel.filters-panel[hidden] {
-  display: none !important;
+.panel.filters-panel.is-open {
+  display: block;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
 }
 
 .filter-group + .filter-group {
-  margin-top: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
 }
 
 .filter-title {
-  display: inline-block;
-  min-width: 36px;
-  color: var(--muted);
-  margin-right: 6px;
+  color: var(--text);
   font-size: 12px;
+  font-weight: 600;
+}
+
+.filter-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
 }
 
 .toggle-row,
 .preset-row {
-  display: inline-flex;
+  display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  width: 100%;
 }
 
 .preset-btn {
@@ -138,7 +155,7 @@ button.ghost {
 }
 
 #umoFilter {
-  margin-left: 6px;
+  flex: 1 1 180px;
   min-width: 180px;
   padding: 4px 8px;
   border-radius: 6px;

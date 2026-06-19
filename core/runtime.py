@@ -10,7 +10,6 @@ class RuntimeFlags:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._echo: bool | None = None
-        self._trace: bool | None = None
 
     def echo_enabled(self, config_default: bool) -> bool:
         with self._lock:
@@ -20,32 +19,16 @@ class RuntimeFlags:
         with self._lock:
             self._echo = value
 
-    def trace_enabled(self, config_default: bool) -> bool:
-        with self._lock:
-            return config_default if self._trace is None else self._trace
-
-    def set_trace(self, value: bool | None) -> None:
-        with self._lock:
-            self._trace = value
-
     def echo_status(self, config_default: bool) -> str:
         with self._lock:
             if self._echo is None:
                 return f"配置默认（{'开' if config_default else '关'}）"
             return "开" if self._echo else "关"
 
-    def trace_status(self, config_default: bool) -> str:
-        with self._lock:
-            if self._trace is None:
-                return f"配置默认（{'开' if config_default else '关'}）"
-            return "开" if self._trace else "关"
-
-    def snapshot(self, *, echo_cfg: bool, trace_cfg: bool) -> dict[str, str]:
+    def snapshot(self, *, echo_cfg: bool) -> dict[str, str]:
         return {
             "echo": self.echo_status(echo_cfg),
-            "trace": self.trace_status(trace_cfg),
             "echo_active": "开" if self.echo_enabled(echo_cfg) else "关",
-            "trace_active": "开" if self.trace_enabled(trace_cfg) else "关",
         }
 
 

@@ -37,7 +37,7 @@
     "description": "管线日志",
     "type": "bool",
     "default": true,
-    "hint": "记录入站、LLM 请求/响应、出站装饰、已发送等阶段；可用 /md trace on|off 临时覆盖。"
+    "hint": "记录入站、LLM 请求/响应、出站装饰、已发送等阶段，在插件 Page「logs」中查看。"
   },
   "persist_traces": {
     "description": "持久化日志",

@@ -36,8 +36,7 @@ def register_trace_page_routes(
 
     async def runtime_status() -> dict:
         echo_cfg = bool(cfg.get("echo_enabled", True)) if cfg else True
-        trace_cfg = bool(cfg.get("trace_enabled", True)) if cfg else True
-        return {"status": "ok", "data": RUNTIME.snapshot(echo_cfg=echo_cfg, trace_cfg=trace_cfg)}
+        return {"status": "ok", "data": RUNTIME.snapshot(echo_cfg=echo_cfg)}
 
     register(
         f"{PAGE_PREFIX}/traces",

@@ -158,6 +158,7 @@ function loadUi() {
     const merged = { ...structuredClone(DEFAULT_UI), ...parsed };
     merged.stages = { ...DEFAULT_UI.stages, ...(parsed.stages || {}) };
     merged.fields = { ...DEFAULT_UI.fields, ...(parsed.fields || {}) };
+    merged.filtersOpen = Boolean(parsed.filtersOpen);
     return merged;
   } catch {
     return structuredClone(DEFAULT_UI);
@@ -226,7 +227,7 @@ function renderToggle(container, entries, group) {
 
 function syncFilterPanel() {
   if (!filterPanel || !btnToggleFilters) return;
-  filterPanel.hidden = !ui.filtersOpen;
+  filterPanel.classList.toggle("is-open", Boolean(ui.filtersOpen));
   btnToggleFilters.textContent = ui.filtersOpen ? "筛选 ▴" : "筛选 ▾";
 }
 
@@ -274,6 +275,7 @@ function bindToolbarEvents() {
     ui.filtersOpen = !ui.filtersOpen;
     saveUi();
     syncFilterPanel();
+    if (ui.filtersOpen) setupToggles();
   });
 }
 
@@ -514,7 +516,7 @@ async function fetchRuntime() {
   try {
     const data = await apiGet("page/runtime");
     if (data && runtimeBadge) {
-      runtimeBadge.textContent = `复读 ${data.echo_active || "?"} · 日志 ${data.trace_active || "?"}`;
+      runtimeBadge.textContent = `复读 ${data.echo_active || "?"}`;
     }
   } catch {
     /* ignore */
@@ -568,7 +570,12 @@ document.addEventListener("visibilitychange", () => {
 
 setupToggles();
 bindToolbarEvents();
-await bridge.ready();
-await fetchTraces();
-await fetchRuntime();
-scheduleRefresh();
+
+async function initPage() {
+  await bridge.ready();
+  await fetchTraces();
+  await fetchRuntime();
+  scheduleRefresh();
+}
+
+initPage().catch(console.error);
