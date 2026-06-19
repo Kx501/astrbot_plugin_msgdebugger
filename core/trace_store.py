@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import threading
 import time
 import uuid
@@ -20,11 +21,12 @@ from .formatters import (
     pick_event_extras,
     summarize_text,
 )
-from .trace_persist import append_trace, clear_file, load_traces
+from .trace_persist import clear_file, load_traces, upsert_trace
+
+_log = logging.getLogger(__name__)
 
 TRACE_EXTRA_KEY = "_md_trace_id"
 LLM_BEFORE_EXTRA = "_md_llm_before"
-_PERSIST_STAGE = "sent"
 
 
 class TraceStore:
@@ -53,6 +55,7 @@ class TraceStore:
     def _load_persist_locked(self) -> None:
         if not self._persist_path:
             return
+        self._traces.clear()
         for trace in load_traces(self._persist_path, limit=self._persist_max):
             trace_id = str(trace.get("id") or "")
             if trace_id:
@@ -116,17 +119,23 @@ class TraceStore:
                     "fields": fields,
                 }
             )
-            if stage == _PERSIST_STAGE:
+            if self._persist_enabled:
                 self._persist_trace_locked(trace)
 
     def _persist_trace_locked(self, trace: dict[str, Any]) -> None:
         if not self._persist_enabled or not self._persist_path:
             return
-        append_trace(
-            self._persist_path,
-            copy.deepcopy(trace),
-            limit=self._persist_max,
-        )
+        try:
+            upsert_trace(
+                self._persist_path,
+                copy.deepcopy(trace),
+                limit=self._persist_max,
+            )
+        except Exception:
+            _log.exception(
+                "MsgDebugger: persist trace failed id=%s",
+                trace.get("id"),
+            )
 
     def list_traces(self) -> list[dict[str, Any]]:
         with self._lock:

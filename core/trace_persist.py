@@ -1,17 +1,21 @@
 # -*- coding: utf-8 -*-
-"""Trace JSONL 持久化（抓包式合集）。"""
+"""Trace JSONL 持久化（按 trace id upsert，保留最新快照）。"""
 
 from __future__ import annotations
 
 import json
+import logging
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
+_log = logging.getLogger(__name__)
 
-def load_traces(path: Path, *, limit: int) -> list[dict[str, Any]]:
-    if not path.is_file() or limit <= 0:
-        return []
-    traces: list[dict[str, Any]] = []
+
+def _read_trace_map(path: Path) -> OrderedDict[str, dict[str, Any]]:
+    by_id: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    if not path.is_file():
+        return by_id
     try:
         with open(path, encoding="utf-8") as f:
             for line in f:
@@ -22,49 +26,57 @@ def load_traces(path: Path, *, limit: int) -> list[dict[str, Any]]:
                     row = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if isinstance(row, dict) and row.get("id"):
-                    traces.append(row)
-    except OSError:
+                if not isinstance(row, dict):
+                    continue
+                trace_id = str(row.get("id") or "")
+                if trace_id:
+                    by_id[trace_id] = row
+    except OSError as exc:
+        _log.warning("MsgDebugger: read traces file failed: %s", exc)
+    return by_id
+
+
+def load_traces(path: Path, *, limit: int) -> list[dict[str, Any]]:
+    if limit <= 0:
         return []
-    if len(traces) > limit:
-        traces = traces[-limit:]
-    return traces
+    items = list(_read_trace_map(path).values())
+    if len(items) > limit:
+        items = items[-limit:]
+    return items
 
 
-def append_trace(path: Path, trace: dict[str, Any], *, limit: int) -> None:
+def upsert_trace(path: Path, trace: dict[str, Any], *, limit: int) -> None:
+    trace_id = str(trace.get("id") or "")
+    if not trace_id:
+        return
+    cap = max(10, int(limit))
+    by_id = _read_trace_map(path)
+    by_id[trace_id] = trace
+    while len(by_id) > cap:
+        by_id.popitem(last=False)
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(trace, ensure_ascii=False, separators=(",", ":"))
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(line + "\n")
-    _trim_file(path, limit)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            for item in by_id.values():
+                f.write(
+                    json.dumps(item, ensure_ascii=False, separators=(",", ":"), default=str)
+                    + "\n"
+                )
+        tmp.replace(path)
+    except OSError as exc:
+        _log.error("MsgDebugger: write traces file failed: %s", exc)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def clear_file(path: Path) -> None:
     try:
         if path.is_file():
             path.unlink()
-    except OSError:
-        pass
-
-
-def _trim_file(path: Path, limit: int) -> None:
-    if limit <= 0 or not path.is_file():
-        return
-    try:
-        with open(path, encoding="utf-8") as f:
-            lines = [ln for ln in f if ln.strip()]
-    except OSError:
-        return
-    if len(lines) <= limit:
-        return
-    keep = lines[-limit:]
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.writelines(ln if ln.endswith("\n") else ln + "\n" for ln in keep)
-        tmp.replace(path)
-    except OSError:
-        try:
-            tmp.unlink(missing_ok=True)
-        except OSError:
-            pass
+    except OSError as exc:
+        _log.warning("MsgDebugger: clear traces file failed: %s", exc)

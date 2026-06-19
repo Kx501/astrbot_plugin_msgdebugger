@@ -43,7 +43,7 @@
     "description": "持久化日志",
     "type": "bool",
     "default": true,
-    "hint": "将完整 trace 写入 data/traces.jsonl，重载插件后仍可查看（类似抓包合集）。"
+    "hint": "将完整 trace 写入 plugin_data/astrbot_plugin_msgdebugger/traces.jsonl，重载插件后仍可查看。"
   },
   "max_persist_entries": {
     "description": "持久化条数上限",
