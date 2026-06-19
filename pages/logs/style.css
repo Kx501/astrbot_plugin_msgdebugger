@@ -35,21 +35,47 @@ body {
   margin: 8px;
   padding: 8px 12px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 8px;
-  flex-wrap: wrap;
 }
 
-.toolbar-left {
+.toolbar-main,
+.toolbar-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   align-items: center;
-  gap: 10px;
+}
+
+.toolbar-main {
+  flex: 1 1 auto;
+}
+
+.toolbar-actions {
+  justify-content: flex-end;
 }
 
 .toolbar h1 {
   margin: 0;
   font-size: 16px;
+  flex: 0 0 auto;
+}
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.preset-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  color: var(--text);
 }
 
 .runtime-badge {
@@ -94,11 +120,19 @@ button.ghost {
 .panel.filters-panel {
   margin: 0 8px 8px;
   padding: 10px 12px;
-  display: none;
 }
 
-.panel.filters-panel.is-open {
-  display: block;
+.filters-summary {
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.filters-summary::-webkit-details-marker {
+  display: inline-block;
+  margin-right: 6px;
 }
 
 .filter-group {
@@ -128,12 +162,21 @@ button.ghost {
   width: 100%;
 }
 
-.toggle-row,
-.preset-row {
+.toggle-row {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   width: 100%;
+}
+
+.trace-head,
+.stage-tab,
+.expand-btn,
+.preset-option,
+.filters-summary,
+button {
+  position: relative;
+  z-index: 1;
 }
 
 .preset-btn {

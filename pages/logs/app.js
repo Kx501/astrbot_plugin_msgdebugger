@@ -138,8 +138,7 @@ const traceList = document.getElementById("traceList");
 const stageToggles = document.getElementById("stageToggles");
 const fieldToggles = document.getElementById("fieldToggles");
 const presetRow = document.getElementById("presetRow");
-const filterPanel = document.getElementById("filterPanel");
-const btnToggleFilters = document.getElementById("btnToggleFilters");
+const filterDetails = document.getElementById("filterDetails");
 const runtimeBadge = document.getElementById("runtimeBadge");
 
 let ui = loadUi();
@@ -150,18 +149,22 @@ const traceTabState = new Map();
 const traceCardExpanded = new Set();
 const fieldExpanded = new Set();
 
+function cloneUi(source) {
+  return JSON.parse(JSON.stringify(source));
+}
+
 function loadUi() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return structuredClone(DEFAULT_UI);
+    if (!raw) return cloneUi(DEFAULT_UI);
     const parsed = JSON.parse(raw);
-    const merged = { ...structuredClone(DEFAULT_UI), ...parsed };
+    const merged = { ...cloneUi(DEFAULT_UI), ...parsed };
     merged.stages = { ...DEFAULT_UI.stages, ...(parsed.stages || {}) };
     merged.fields = { ...DEFAULT_UI.fields, ...(parsed.fields || {}) };
     merged.filtersOpen = Boolean(parsed.filtersOpen);
     return merged;
   } catch {
-    return structuredClone(DEFAULT_UI);
+    return cloneUi(DEFAULT_UI);
   }
 }
 
@@ -176,107 +179,171 @@ function applyPreset(name) {
   ui.stages = { ...preset.stages };
   ui.fields = { ...preset.fields };
   saveUi();
-  setupToggles();
+  syncPresetRadios();
+  renderFilterToggles();
   renderTraces(lastData);
 }
 
-function markCustomPreset() {
-  ui.preset = "custom";
-  saveUi();
-  renderPresetButtons();
+function syncPresetRadios() {
+  if (!presetRow) return;
+  const current = ui.preset === "custom" ? "" : ui.preset;
+  presetRow.querySelectorAll('input[name="preset"]').forEach((input) => {
+    input.checked = input.value === current;
+  });
 }
 
-function renderPresetButtons() {
-  presetRow.innerHTML = "";
-  for (const [key, preset] of Object.entries(PRESETS)) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "preset-btn" + (ui.preset === key ? " active" : "");
-    btn.textContent = preset.label;
-    btn.addEventListener("click", () => applyPreset(key));
-    presetRow.append(btn);
-  }
-  if (ui.preset === "custom") {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "preset-btn active";
-    btn.textContent = "自定义";
-    btn.disabled = true;
-    presetRow.append(btn);
-  }
+function renderFilterToggles() {
+  renderToggle(stageToggles, Object.entries(STAGE_LABELS), "stages");
+  renderToggle(fieldToggles, Object.entries(FIELD_LABELS), "fields");
 }
 
 function renderToggle(container, entries, group) {
+  if (!container) return;
   container.innerHTML = "";
   for (const [key, label] of entries) {
     const wrap = document.createElement("label");
     wrap.className = "inline";
     const input = document.createElement("input");
     input.type = "checkbox";
+    input.dataset.key = key;
+    input.dataset.group = group;
     input.checked = ui[group][key] !== false;
-    input.addEventListener("change", () => {
-      ui[group][key] = input.checked;
-      markCustomPreset();
-      saveUi();
-      renderTraces(lastData);
-    });
     wrap.append(input, document.createTextNode(label));
     container.append(wrap);
   }
 }
 
-function syncFilterPanel() {
-  if (!filterPanel || !btnToggleFilters) return;
-  filterPanel.classList.toggle("is-open", Boolean(ui.filtersOpen));
-  btnToggleFilters.textContent = ui.filtersOpen ? "筛选 ▴" : "筛选 ▾";
+function syncFilterDetails() {
+  if (!filterDetails) return;
+  filterDetails.open = Boolean(ui.filtersOpen);
 }
 
-function setupToggles() {
-  renderPresetButtons();
-  renderToggle(stageToggles, Object.entries(STAGE_LABELS), "stages");
-  renderToggle(fieldToggles, Object.entries(FIELD_LABELS), "fields");
+function setupUiControls() {
+  syncPresetRadios();
+  renderFilterToggles();
+  syncFilterDetails();
 
-  document.getElementById("optDiff").checked = ui.optDiff;
-  document.getElementById("optCollapse").checked = ui.optCollapse;
-  document.getElementById("autoRefresh").checked = ui.autoRefresh;
-  document.getElementById("fastRefresh").checked = ui.fastRefresh;
-  document.getElementById("umoFilter").value = ui.umoFilter || "";
-  syncFilterPanel();
+  const optDiff = document.getElementById("optDiff");
+  const optCollapse = document.getElementById("optCollapse");
+  const autoRefresh = document.getElementById("autoRefresh");
+  const fastRefresh = document.getElementById("fastRefresh");
+  const umoFilter = document.getElementById("umoFilter");
+
+  if (optDiff) optDiff.checked = ui.optDiff;
+  if (optCollapse) optCollapse.checked = ui.optCollapse;
+  if (autoRefresh) autoRefresh.checked = ui.autoRefresh;
+  if (fastRefresh) fastRefresh.checked = ui.fastRefresh;
+  if (umoFilter) umoFilter.value = ui.umoFilter || "";
 }
 
-function bindToolbarEvents() {
-  document.getElementById("optDiff").addEventListener("change", (e) => {
+function bindEvents() {
+  presetRow?.addEventListener("change", (e) => {
+    const input = e.target;
+    if (!(input instanceof HTMLInputElement) || input.name !== "preset") return;
+    applyPreset(input.value);
+  });
+
+  filterDetails?.addEventListener("toggle", () => {
+    ui.filtersOpen = Boolean(filterDetails.open);
+    saveUi();
+    if (filterDetails.open) renderFilterToggles();
+  });
+
+  stageToggles?.addEventListener("change", onFilterToggleChange);
+  fieldToggles?.addEventListener("change", onFilterToggleChange);
+
+  document.getElementById("optDiff")?.addEventListener("change", (e) => {
     ui.optDiff = e.target.checked;
     saveUi();
     renderTraces(lastData);
   });
-  document.getElementById("optCollapse").addEventListener("change", (e) => {
+  document.getElementById("optCollapse")?.addEventListener("change", (e) => {
     ui.optCollapse = e.target.checked;
     saveUi();
     renderTraces(lastData);
   });
-  document.getElementById("autoRefresh").addEventListener("change", (e) => {
+  document.getElementById("autoRefresh")?.addEventListener("change", (e) => {
     ui.autoRefresh = e.target.checked;
     saveUi();
     scheduleRefresh();
     if (ui.autoRefresh) fetchTraces().catch(console.error);
   });
-  document.getElementById("fastRefresh").addEventListener("change", (e) => {
+  document.getElementById("fastRefresh")?.addEventListener("change", (e) => {
     ui.fastRefresh = e.target.checked;
     saveUi();
     scheduleRefresh();
   });
-  document.getElementById("umoFilter").addEventListener("input", (e) => {
+  document.getElementById("umoFilter")?.addEventListener("input", (e) => {
     ui.umoFilter = e.target.value.trim();
     saveUi();
     renderTraces(lastData);
   });
-  btnToggleFilters?.addEventListener("click", () => {
-    ui.filtersOpen = !ui.filtersOpen;
-    saveUi();
-    syncFilterPanel();
-    if (ui.filtersOpen) setupToggles();
+  document.getElementById("btnRefresh")?.addEventListener("click", () => {
+    lastSignature = "";
+    fetchTraces().catch(console.error);
+    fetchRuntime().catch(console.error);
   });
+  document.getElementById("btnClear")?.addEventListener("click", clearTraces);
+
+  traceList?.addEventListener("click", onTraceListClick);
+}
+
+function onFilterToggleChange(e) {
+  const input = e.target;
+  if (!(input instanceof HTMLInputElement) || input.type !== "checkbox") return;
+  const group = input.dataset.group;
+  const key = input.dataset.key;
+  if (!group || !key || !ui[group]) return;
+  ui[group][key] = input.checked;
+  ui.preset = "custom";
+  saveUi();
+  syncPresetRadios();
+  renderTraces(lastData);
+}
+
+function onTraceListClick(e) {
+  const expandBtn = e.target.closest(".expand-btn");
+  if (expandBtn) {
+    const field = expandBtn.closest(".field");
+    const body = field?.querySelector(".field-body");
+    const fieldKey = expandBtn.dataset.fieldKey;
+    if (!body || !fieldKey) return;
+    const collapsed = body.classList.toggle("collapsed");
+    if (collapsed) {
+      fieldExpanded.delete(fieldKey);
+      expandBtn.textContent = "展开";
+    } else {
+      fieldExpanded.add(fieldKey);
+      expandBtn.textContent = "收起";
+    }
+    return;
+  }
+
+  const tab = e.target.closest(".stage-tab");
+  if (tab) {
+    const card = tab.closest(".trace-card");
+    const traceId = card?.dataset.traceId;
+    const stageKey = tab.dataset.stage;
+    if (!card || !traceId || !stageKey) return;
+    traceTabState.set(traceId, stageKey);
+    card.querySelectorAll(".stage-tab").forEach((el) => el.classList.remove("active"));
+    card.querySelectorAll(".stage-panel").forEach((el) => el.classList.remove("active"));
+    tab.classList.add("active");
+    card.querySelector(`.stage-panel[data-stage="${stageKey}"]`)?.classList.add("active");
+    return;
+  }
+
+  const head = e.target.closest(".trace-head");
+  if (head) {
+    const card = head.closest(".trace-card");
+    const traceId = card?.dataset.traceId;
+    if (!card || !traceId) return;
+    const collapsed = card.classList.toggle("collapsed");
+    if (collapsed) traceCardExpanded.delete(traceId);
+    else traceCardExpanded.add(traceId);
+    const hint = head.querySelector(".expand-hint");
+    if (hint) hint.textContent = collapsed ? "▸" : "▾";
+  }
 }
 
 function stagePlainText(stage) {
@@ -345,18 +412,8 @@ function renderFieldBody(field, diff, fieldKey) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "expand-btn";
+    btn.dataset.fieldKey = fieldKey;
     btn.textContent = expanded ? "收起" : "展开";
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const collapsed = wrap.classList.toggle("collapsed");
-      if (collapsed) {
-        fieldExpanded.delete(fieldKey);
-        btn.textContent = "展开";
-      } else {
-        fieldExpanded.add(fieldKey);
-        btn.textContent = "收起";
-      }
-    });
     return { wrap, extra: btn };
   }
   return { wrap, extra: null };
@@ -373,6 +430,7 @@ function visibleStages(trace) {
 }
 
 function renderTraces(traces) {
+  if (!traceList) return;
   traceList.innerHTML = "";
   const needle = (ui.umoFilter || "").toLowerCase();
   const filtered = traces.filter((trace) => {
@@ -396,17 +454,15 @@ function renderTraces(traces) {
     if (!stages.length) continue;
 
     const card = document.getElementById("traceTpl").content.firstElementChild.cloneNode(true);
+    card.dataset.traceId = trace.id || "";
     const head = card.querySelector(".trace-head");
+    head.querySelector(".time").textContent = trace.started_at || "";
+    head.querySelector(".badge.chat").textContent = trace.chat || "";
+    head.querySelector(".badge.sender").textContent = trace.sender_name || trace.sender_id || "";
+    head.querySelector(".summary").textContent = trace.summary || "";
+
     const tabsNav = card.querySelector(".stage-tabs");
     const panelsWrap = card.querySelector(".stage-panels");
-
-    head.innerHTML = `
-      <span class="time">${escapeHtml(trace.started_at || "")}</span>
-      <span class="badge">${escapeHtml(trace.chat || "")}</span>
-      <span class="badge">${escapeHtml(trace.sender_name || trace.sender_id || "")}</span>
-      <span class="summary">${escapeHtml(trace.summary || "")}</span>
-      <span class="expand-hint">▸</span>
-    `;
 
     let activeKey = traceTabState.get(trace.id);
     if (!activeKey || !stages.some(({ stage }) => stage.key === activeKey)) {
@@ -417,19 +473,13 @@ function renderTraces(traces) {
     for (const { stage, fields } of stages) {
       const panel = document.createElement("div");
       panel.className = "stage-panel" + (stage.key === activeKey ? " active" : "");
+      panel.dataset.stage = stage.key;
 
       const tab = document.createElement("button");
       tab.type = "button";
       tab.className = "stage-tab" + (stage.key === activeKey ? " active" : "");
+      tab.dataset.stage = stage.key;
       tab.textContent = STAGE_LABELS[stage.key] || stage.key;
-      tab.addEventListener("click", (e) => {
-        e.stopPropagation();
-        traceTabState.set(trace.id, stage.key);
-        tabsNav.querySelectorAll(".stage-tab").forEach((el) => el.classList.remove("active"));
-        panelsWrap.querySelectorAll(".stage-panel").forEach((el) => el.classList.remove("active"));
-        tab.classList.add("active");
-        panel.classList.add("active");
-      });
       tabsNav.append(tab);
 
       const currentText = stagePlainText(stage);
@@ -458,23 +508,9 @@ function renderTraces(traces) {
       if (currentText) prevText = currentText;
     }
 
-    head.addEventListener("click", () => {
-      const collapsed = card.classList.toggle("collapsed");
-      if (collapsed) {
-        traceCardExpanded.delete(trace.id);
-      } else {
-        traceCardExpanded.add(trace.id);
-      }
-      const hint = head.querySelector(".expand-hint");
-      if (hint) hint.textContent = collapsed ? "▸" : "▾";
-    });
-
     const cardOpen = traceCardExpanded.has(trace.id);
-    if (!cardOpen) card.classList.add("collapsed");
-    else {
-      const hint = head.querySelector(".expand-hint");
-      if (hint) hint.textContent = "▾";
-    }
+    card.classList.toggle("collapsed", !cardOpen);
+    head.querySelector(".expand-hint").textContent = cardOpen ? "▾" : "▸";
     traceList.append(card);
   }
 }
@@ -487,13 +523,6 @@ function tracesSignature(traces) {
       return `${t.id}:${stages.length}:${tail?.key || ""}:${tail?.at || ""}`;
     })
     .join("|");
-}
-
-function escapeHtml(text) {
-  return String(text)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
 }
 
 async function apiGet(path) {
@@ -550,13 +579,6 @@ function scheduleRefresh() {
   }, refreshIntervalMs());
 }
 
-document.getElementById("btnRefresh").addEventListener("click", () => {
-  lastSignature = "";
-  fetchTraces().catch(console.error);
-  fetchRuntime().catch(console.error);
-});
-document.getElementById("btnClear").addEventListener("click", clearTraces);
-
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     fetchTraces().catch(console.error);
@@ -568,10 +590,13 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-setupToggles();
-bindToolbarEvents();
-
 async function initPage() {
+  if (!bridge?.ready) {
+    console.error("MsgDebugger logs: AstrBotPluginPage bridge 不可用");
+    return;
+  }
+  bindEvents();
+  setupUiControls();
   await bridge.ready();
   await fetchTraces();
   await fetchRuntime();

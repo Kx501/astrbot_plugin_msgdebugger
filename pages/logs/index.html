@@ -8,9 +8,22 @@
   </head>
   <body>
     <header class="toolbar">
-      <div class="toolbar-left">
+      <div class="toolbar-main">
         <h1>管线日志</h1>
-        <div id="presetRow" class="preset-row"></div>
+        <div id="presetRow" class="preset-row">
+          <label class="preset-option">
+            <input type="radio" name="preset" value="compact" checked />
+            精简
+          </label>
+          <label class="preset-option">
+            <input type="radio" name="preset" value="injection" />
+            注入
+          </label>
+          <label class="preset-option">
+            <input type="radio" name="preset" value="full" />
+            完整
+          </label>
+        </div>
         <span id="runtimeBadge" class="runtime-badge"></span>
       </div>
       <div class="toolbar-actions">
@@ -24,11 +37,11 @@
         </label>
         <button type="button" id="btnRefresh">刷新</button>
         <button type="button" id="btnClear" class="danger">清空</button>
-        <button type="button" id="btnToggleFilters" class="ghost">筛选 ▾</button>
       </div>
     </header>
 
-    <section id="filterPanel" class="panel filters-panel">
+    <details id="filterDetails" class="panel filters-panel">
+      <summary class="filters-summary">筛选</summary>
       <div class="filter-group">
         <div class="filter-title">阶段</div>
         <div id="stageToggles" class="toggle-row"></div>
@@ -45,12 +58,18 @@
           <input type="text" id="umoFilter" placeholder="过滤 umo / 发送者…" />
         </div>
       </div>
-    </section>
+    </details>
 
     <main id="traceList" class="trace-list"></main>
     <template id="traceTpl">
-      <article class="trace-card">
-        <header class="trace-head"></header>
+      <article class="trace-card collapsed" data-trace-id="">
+        <header class="trace-head">
+          <span class="time"></span>
+          <span class="badge chat"></span>
+          <span class="badge sender"></span>
+          <span class="summary"></span>
+          <span class="expand-hint">▸</span>
+        </header>
         <div class="trace-body">
           <nav class="stage-tabs"></nav>
           <div class="stage-panels"></div>

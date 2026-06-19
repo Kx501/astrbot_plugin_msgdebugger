@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,6 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, StarTools
-from astrbot.core.star.filter.command import GreedyStr
 
 from .core.page_api import register_trace_page_routes
 from .core.runtime import RUNTIME
@@ -119,6 +119,20 @@ def _sender_name(event: AstrMessageEvent) -> str:
     return str(event.get_sender_id())
 
 
+def _md_command_tail(event: AstrMessageEvent, context: Context) -> str:
+    text = re.sub(r"\s+", " ", (event.get_message_str() or event.message_str or "").strip())
+    for prefix in _wake_prefixes(context, event):
+        if text.startswith(prefix):
+            text = text[len(prefix) :].strip()
+            break
+    lowered = text.lower()
+    if lowered == "md":
+        return ""
+    if lowered.startswith("md "):
+        return text[3:].strip()
+    return ""
+
+
 def _parse_md_args(raw: str) -> tuple[str, str]:
     parts = str(raw or "").strip().split()
     if not parts:
@@ -203,9 +217,9 @@ class MsgDebuggerStar(Star):
         _TRACE_STORE.add_stage(trace_id, stage, fields)
 
     @filter.command("md")
-    async def md_command(self, event: AstrMessageEvent, args: GreedyStr) -> None:
+    async def md_command(self, event: AstrMessageEvent) -> None:
         """MsgDebugger 控制：/md echo on|off|status|reset"""
-        topic, action = _parse_md_args(str(args))
+        topic, action = _parse_md_args(_md_command_tail(event, self.context))
         if topic != "echo":
             yield event.plain_result("用法：/md echo on|off|status|reset")
             return
@@ -223,9 +237,8 @@ class MsgDebuggerStar(Star):
 
         RUNTIME.set_echo(value)
         active = "开" if _echo_runtime_enabled(self.cfg) else "关"
-        yield event.plain_result(
-            f"复读已设为 {RUNTIME.echo_status(bool(self.cfg.get('echo_enabled', True)))}（当前 {active}）"
-        )
+        label = RUNTIME.echo_status(bool(self.cfg.get("echo_enabled", True)))
+        yield event.plain_result(f"复读已设为 {label}（当前 {active}）")
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_trace_inbound(self, event: AstrMessageEvent) -> None:
