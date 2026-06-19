@@ -209,7 +209,7 @@ async function loadUiState() {
   const local = loadUiFromStorage();
   try {
     await ensureBridgeReady();
-    const data = await apiGet("page/ui-state");
+    const data = await apiGet("page/runtime");
     const remote = data?.ui;
     if (remote && typeof remote === "object" && Object.keys(remote).length) {
       return normalizeUi(remote);
@@ -220,7 +220,8 @@ async function loadUiState() {
   return local;
 }
 
-function saveUi() {
+function saveUi(options = {}) {
+  const { immediate = false } = options;
   const payload = serializeUiState();
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -228,19 +229,22 @@ function saveUi() {
     /* sandbox iframe may block storage */
   }
   clearTimeout(saveUiTimer);
+  if (immediate) {
+    void persistUiState(payload);
+    return;
+  }
   saveUiTimer = setTimeout(() => {
-    persistUiState(payload);
-  }, 200);
+    void persistUiState(payload);
+  }, 300);
 }
 
 async function persistUiState(payload) {
+  if (!bridge?.apiPost) {
+    console.warn("MsgDebugger: bridge apiPost 不可用");
+    return false;
+  }
   try {
-    await ensureBridgeReady();
-    if (!bridge?.apiPost) {
-      console.warn("MsgDebugger: bridge apiPost 不可用");
-      return false;
-    }
-    await bridge.apiPost("page/ui-state", { ui: payload || serializeUiState() });
+    await bridgePost("page/runtime", { ui: payload || serializeUiState() });
     return true;
   } catch (err) {
     console.error("MsgDebugger: 保存 UI 状态失败:", err);
@@ -257,7 +261,7 @@ function applyPreset(name) {
   syncPresetRadios();
   renderFilterToggles();
   renderTraces(lastData);
-  saveUi();
+  saveUi({ immediate: true });
 }
 
 function syncPresetRadios() {
@@ -289,7 +293,7 @@ function renderToggle(container, entries, group) {
       ui.preset = "custom";
       syncPresetRadios();
       renderTraces(lastData);
-      saveUi();
+      saveUi({ immediate: true });
     });
     wrap.append(input, document.createTextNode(label));
     container.append(wrap);
@@ -344,7 +348,7 @@ function bindEvents() {
 
   filterDetails?.addEventListener("toggle", () => {
     ui.filtersOpen = Boolean(filterDetails.open);
-    saveUi();
+    saveUi({ immediate: true });
     if (filterDetails.open) renderFilterToggles();
   });
 
@@ -354,27 +358,27 @@ function bindEvents() {
   document.getElementById("optDiff")?.addEventListener("change", (e) => {
     ui.optDiff = e.target.checked;
     renderTraces(lastData);
-    saveUi();
+    saveUi({ immediate: true });
   });
   document.getElementById("optCollapse")?.addEventListener("change", (e) => {
     ui.optCollapse = e.target.checked;
     renderTraces(lastData);
-    saveUi();
+    saveUi({ immediate: true });
   });
   document.getElementById("autoRefresh")?.addEventListener("change", (e) => {
     ui.autoRefresh = e.target.checked;
     if (ui.autoRefresh) startPolling();
     else stopPolling();
-    saveUi();
+    saveUi({ immediate: true });
   });
   document.getElementById("fastRefresh")?.addEventListener("change", (e) => {
     ui.fastRefresh = e.target.checked;
     if (isAutoRefreshOn()) startPolling();
-    saveUi();
+    saveUi({ immediate: true });
   });
   document.getElementById("autoScroll")?.addEventListener("change", (e) => {
     ui.autoScroll = e.target.checked;
-    saveUi();
+    saveUi({ immediate: true });
   });
   document.getElementById("umoFilter")?.addEventListener("input", (e) => {
     ui.umoFilter = e.target.value.trim();
@@ -399,7 +403,7 @@ function onFilterToggleChange(e) {
   ui.preset = "custom";
   syncPresetRadios();
   renderTraces(lastData);
-  saveUi();
+  saveUi({ immediate: true });
 }
 
 function onTraceListClick(e) {
@@ -673,6 +677,19 @@ async function bridgeGet(path) {
   ]);
 }
 
+async function bridgePost(path, body) {
+  await ensureBridgeReady();
+  if (!bridge?.apiPost) {
+    throw new Error("AstrBotPluginPage bridge 不可用");
+  }
+  return Promise.race([
+    bridge.apiPost(path, body),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`bridge 请求超时: ${path}`)), BRIDGE_TIMEOUT_MS),
+    ),
+  ]);
+}
+
 async function apiGet(path) {
   const res = await bridgeGet(path);
   if (res && typeof res === "object" && res.status === "ok" && res.data !== undefined) {
@@ -732,7 +749,7 @@ async function fetchRuntime() {
 }
 
 async function clearTraces() {
-  await bridge.apiPost("page/traces/clear", {});
+  await bridgePost("page/traces/clear", {});
   lastData = [];
   lastSignature = "0";
   prevTopTraceId = "";

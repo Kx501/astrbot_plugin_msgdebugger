@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import copy
-import json
 import re
 from pathlib import Path
 from typing import Any
@@ -17,7 +16,6 @@ from astrbot.api.star import Context, Star, StarTools
 
 from .core.page_api import register_trace_page_routes
 from .core.runtime import RUNTIME
-from .core.ui_state import load_ui_state, save_ui_state
 from .core.trace_store import (
     LLM_BEFORE_EXTRA,
     TraceStore,
@@ -187,29 +185,6 @@ class MsgDebuggerStar(Star):
                 limit = 200
             _TRACE_STORE.set_max_traces(limit)
 
-    def _ui_state_path(self) -> Path:
-        return self._plugin_data_dir() / "logs_ui.json"
-
-    async def _api_get_ui_state(self) -> dict:
-        return {"status": "ok", "data": {"ui": load_ui_state(self._ui_state_path())}}
-
-    async def _api_post_ui_state(self) -> dict:
-        from astrbot.api.web import request
-
-        body = await request.json(default=None)
-        if not isinstance(body, dict):
-            raw = await request.body()
-            if raw:
-                try:
-                    body = json.loads(raw.decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError):
-                    body = {}
-            else:
-                body = {}
-        if not save_ui_state(self._ui_state_path(), body):
-            return {"status": "error", "message": "invalid ui state payload"}
-        return {"status": "ok", "data": {"saved": True}}
-
     def _register_page_api(self) -> None:
         if not hasattr(self.context, "register_web_api"):
             logger.warning("MsgDebugger: 当前 AstrBot 不支持 register_web_api，日志 Page 不可用")
@@ -220,8 +195,6 @@ class MsgDebuggerStar(Star):
                 _TRACE_STORE,
                 self.cfg,
                 data_dir=self._plugin_data_dir(),
-                get_ui_state=self._api_get_ui_state,
-                post_ui_state=self._api_post_ui_state,
             ):
                 logger.info("MsgDebugger: 已注册 logs 页面 API")
         except Exception:

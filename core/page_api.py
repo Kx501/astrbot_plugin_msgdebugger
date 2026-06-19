@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 from .runtime import RUNTIME
 from .ui_state import load_ui_state, save_ui_state
@@ -26,13 +26,13 @@ def register_trace_page_routes(
     cfg: AstrBotConfig | None = None,
     *,
     data_dir: Path | None = None,
-    get_ui_state: Callable[[], Awaitable[dict]] | None = None,
-    post_ui_state: Callable[[], Awaitable[dict]] | None = None,
 ) -> bool:
     """注册 logs 页面 API；不可用时返回 False。"""
     register = getattr(context, "register_web_api", None)
     if not callable(register):
         return False
+
+    ui_state_path = (data_dir / "logs_ui.json") if data_dir else None
 
     async def list_traces() -> dict:
         return {"status": "ok", "data": {"traces": store.list_traces()}}
@@ -43,15 +43,13 @@ def register_trace_page_routes(
 
     async def runtime_status() -> dict:
         echo_cfg = bool(cfg.get("echo_enabled", True)) if cfg else True
-        return {"status": "ok", "data": RUNTIME.snapshot(echo_cfg=echo_cfg)}
+        data = RUNTIME.snapshot(echo_cfg=echo_cfg)
+        data["ui"] = load_ui_state(ui_state_path) if ui_state_path else {}
+        return {"status": "ok", "data": data}
 
-    ui_state_path = (data_dir / "logs_ui.json") if data_dir else None
+    async def save_runtime() -> dict:
+        from astrbot.api import logger
 
-    async def get_ui_state_fallback() -> dict:
-        ui = load_ui_state(ui_state_path) if ui_state_path else {}
-        return {"status": "ok", "data": {"ui": ui}}
-
-    async def post_ui_state_fallback() -> dict:
         if not ui_state_path:
             return {"status": "error", "message": "UI state path unavailable"}
         try:
@@ -60,11 +58,10 @@ def register_trace_page_routes(
             return {"status": "error", "message": "web request unavailable"}
         body = await _read_json_body(plugin_request)
         if not save_ui_state(ui_state_path, body):
+            logger.warning("MsgDebugger: ui state save rejected, body=%s", type(body).__name__)
             return {"status": "error", "message": "invalid ui state payload"}
+        logger.info("MsgDebugger: ui state saved -> %s", ui_state_path)
         return {"status": "ok", "data": {"saved": True}}
-
-    get_ui_handler = get_ui_state or get_ui_state_fallback
-    post_ui_handler = post_ui_state or post_ui_state_fallback
 
     register(
         f"{PAGE_PREFIX}/traces",
@@ -85,14 +82,8 @@ def register_trace_page_routes(
         "MsgDebugger runtime flags",
     )
     register(
-        f"{PAGE_PREFIX}/ui-state",
-        get_ui_handler,
-        ["GET"],
-        "MsgDebugger logs page UI state",
-    )
-    register(
-        f"{PAGE_PREFIX}/ui-state",
-        post_ui_handler,
+        f"{PAGE_PREFIX}/runtime",
+        save_runtime,
         ["POST"],
         "Save MsgDebugger logs page UI state",
     )
