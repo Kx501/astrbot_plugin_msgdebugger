@@ -145,14 +145,19 @@ let ui = loadUi();
 let lastData = [];
 let lastSignature = "";
 let refreshTimer = null;
-let pollRunning = false;
-let pollGeneration = 0;
 const traceTabState = new Map();
 const traceCardExpanded = new Set();
 const fieldExpanded = new Set();
 
 function cloneUi(source) {
   return JSON.parse(JSON.stringify(source));
+}
+
+function asBool(value, fallback) {
+  if (value === true || value === false) return value;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return fallback;
 }
 
 function loadUi() {
@@ -163,7 +168,11 @@ function loadUi() {
     const merged = { ...cloneUi(DEFAULT_UI), ...parsed };
     merged.stages = { ...DEFAULT_UI.stages, ...(parsed.stages || {}) };
     merged.fields = { ...DEFAULT_UI.fields, ...(parsed.fields || {}) };
-    merged.filtersOpen = Boolean(parsed.filtersOpen);
+    merged.filtersOpen = asBool(parsed.filtersOpen, false);
+    merged.optDiff = asBool(parsed.optDiff, DEFAULT_UI.optDiff);
+    merged.optCollapse = asBool(parsed.optCollapse, DEFAULT_UI.optCollapse);
+    merged.autoRefresh = asBool(parsed.autoRefresh, DEFAULT_UI.autoRefresh);
+    merged.fastRefresh = asBool(parsed.fastRefresh, DEFAULT_UI.fastRefresh);
     return merged;
   } catch {
     return cloneUi(DEFAULT_UI);
@@ -171,7 +180,11 @@ function loadUi() {
 }
 
 function saveUi() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(ui));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(ui));
+  } catch {
+    /* sandbox iframe may block storage */
+  }
 }
 
 function applyPreset(name) {
@@ -180,10 +193,10 @@ function applyPreset(name) {
   ui.preset = name;
   ui.stages = { ...preset.stages };
   ui.fields = { ...preset.fields };
-  saveUi();
   syncPresetRadios();
   renderFilterToggles();
   renderTraces(lastData);
+  saveUi();
 }
 
 function syncPresetRadios() {
@@ -213,9 +226,9 @@ function renderToggle(container, entries, group) {
     input.addEventListener("change", () => {
       ui[group][key] = input.checked;
       ui.preset = "custom";
-      saveUi();
       syncPresetRadios();
       renderTraces(lastData);
+      saveUi();
     });
     wrap.append(input, document.createTextNode(label));
     container.append(wrap);
@@ -257,9 +270,12 @@ function isAutoRefreshOn() {
 }
 
 function bindEvents() {
-  presetRow?.addEventListener("change", (e) => {
-    const input = e.target;
-    if (!(input instanceof HTMLInputElement) || input.name !== "preset") return;
+  presetRow?.addEventListener("click", (e) => {
+    const label = e.target.closest(".preset-option");
+    if (!label) return;
+    const input = label.querySelector('input[type="radio"][name="preset"]');
+    if (!(input instanceof HTMLInputElement)) return;
+    if (!input.checked) input.checked = true;
     applyPreset(input.value);
   });
 
@@ -274,33 +290,32 @@ function bindEvents() {
 
   document.getElementById("optDiff")?.addEventListener("change", (e) => {
     ui.optDiff = e.target.checked;
-    saveUi();
     renderTraces(lastData);
+    saveUi();
   });
   document.getElementById("optCollapse")?.addEventListener("change", (e) => {
     ui.optCollapse = e.target.checked;
-    saveUi();
     renderTraces(lastData);
+    saveUi();
   });
   document.getElementById("autoRefresh")?.addEventListener("change", (e) => {
     ui.autoRefresh = e.target.checked;
-    saveUi();
     if (ui.autoRefresh) startPolling();
     else stopPolling();
+    saveUi();
   });
   document.getElementById("fastRefresh")?.addEventListener("change", (e) => {
     ui.fastRefresh = e.target.checked;
-    saveUi();
     if (isAutoRefreshOn()) startPolling();
+    saveUi();
   });
   document.getElementById("umoFilter")?.addEventListener("input", (e) => {
     ui.umoFilter = e.target.value.trim();
-    saveUi();
     renderTraces(lastData);
+    saveUi();
   });
   document.getElementById("btnRefresh")?.addEventListener("click", () => {
-    fetchTraces({ force: true }).catch(console.error);
-    fetchRuntime().catch(console.error);
+    refreshNow({ force: true }).catch(console.error);
   });
   document.getElementById("btnClear")?.addEventListener("click", clearTraces);
 
@@ -315,9 +330,9 @@ function onFilterToggleChange(e) {
   if (!group || !key || !ui[group]) return;
   ui[group][key] = input.checked;
   ui.preset = "custom";
-  saveUi();
   syncPresetRadios();
   renderTraces(lastData);
+  saveUi();
 }
 
 function onTraceListClick(e) {
@@ -463,7 +478,7 @@ function renderTraces(traces) {
   if (!filtered.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = "暂无记录。发消息后点刷新，或开启自动刷新。";
+    empty.textContent = "暂无记录。发消息后应自动出现；也可点「刷新」。";
     traceList.append(empty);
     return;
   }
@@ -545,8 +560,34 @@ function tracesSignature(traces) {
     .join("|");
 }
 
+const BRIDGE_TIMEOUT_MS = 12000;
+
+function ensureBridgeReady() {
+  if (!bridge?.ready) return Promise.resolve();
+  if (typeof bridge.getContext === "function" && bridge.getContext()) {
+    return Promise.resolve();
+  }
+  return Promise.race([
+    bridge.ready(),
+    new Promise((resolve) => setTimeout(resolve, 1500)),
+  ]);
+}
+
+async function bridgeGet(path) {
+  await ensureBridgeReady();
+  if (!bridge?.apiGet) {
+    throw new Error("AstrBotPluginPage bridge 不可用");
+  }
+  return Promise.race([
+    bridge.apiGet(path),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`bridge 请求超时: ${path}`)), BRIDGE_TIMEOUT_MS),
+    ),
+  ]);
+}
+
 async function apiGet(path) {
-  const res = await bridge.apiGet(path);
+  const res = await bridgeGet(path);
   if (res && typeof res === "object" && res.status === "ok" && res.data !== undefined) {
     return res.data;
   }
@@ -565,17 +606,10 @@ async function fetchTraces(options = {}) {
   return true;
 }
 
-async function pollOnce() {
-  if (pollRunning) return;
-  pollRunning = true;
-  try {
-    await fetchTraces();
-    await fetchRuntime();
-  } catch (err) {
-    console.error("MsgDebugger poll failed:", err);
-  } finally {
-    pollRunning = false;
-  }
+async function refreshNow(options = {}) {
+  const { force = false } = options;
+  await fetchTraces({ force });
+  await fetchRuntime();
 }
 
 function refreshIntervalMs() {
@@ -583,31 +617,20 @@ function refreshIntervalMs() {
   return ui.fastRefresh ? 1000 : 3000;
 }
 
-function cancelScheduledPoll() {
+function stopPolling() {
   if (refreshTimer) {
-    clearTimeout(refreshTimer);
+    clearInterval(refreshTimer);
     refreshTimer = null;
   }
-}
-
-function stopPolling() {
-  pollGeneration += 1;
-  cancelScheduledPoll();
-}
-
-async function tickPoll(gen) {
-  if (gen !== pollGeneration || !isAutoRefreshOn()) return;
-  await pollOnce();
-  if (gen !== pollGeneration || !isAutoRefreshOn()) return;
-  refreshTimer = setTimeout(() => tickPoll(gen), refreshIntervalMs());
 }
 
 function startPolling() {
   syncAutoRefreshFromDom();
   stopPolling();
   if (!isAutoRefreshOn()) return;
-  const gen = pollGeneration;
-  tickPoll(gen);
+  refreshTimer = setInterval(() => {
+    refreshNow().catch((err) => console.error("MsgDebugger auto refresh failed:", err));
+  }, refreshIntervalMs());
 }
 
 async function fetchRuntime() {
@@ -631,16 +654,19 @@ async function clearTraces() {
 }
 
 async function initPage() {
-  if (!bridge?.ready) {
-    console.error("MsgDebugger logs: AstrBotPluginPage bridge 不可用");
-    return;
-  }
   bindEvents();
   setupUiControls();
-  await bridge.ready();
+
+  if (typeof bridge?.onContext === "function") {
+    bridge.onContext(() => {
+      if (!lastData.length) {
+        refreshNow({ force: true }).catch(console.error);
+      }
+    });
+  }
+
   try {
-    await fetchTraces({ force: true });
-    await fetchRuntime();
+    await refreshNow({ force: true });
   } catch (err) {
     console.error("MsgDebugger init fetch failed:", err);
   }
@@ -648,7 +674,7 @@ async function initPage() {
 }
 
 window.addEventListener("focus", () => {
-  if (isAutoRefreshOn()) pollOnce().catch(console.error);
+  if (isAutoRefreshOn()) refreshNow().catch(console.error);
 });
 
 initPage().catch(console.error);
