@@ -8,30 +8,42 @@
   </head>
   <body>
     <header class="toolbar">
-      <h1>管线日志</h1>
+      <div class="toolbar-left">
+        <h1>管线日志</h1>
+        <span id="runtimeBadge" class="runtime-badge" title="运行时状态"></span>
+      </div>
       <div class="toolbar-actions">
         <label class="inline">
           <input type="checkbox" id="autoRefresh" checked />
           自动刷新
         </label>
+        <label class="inline">
+          <input type="checkbox" id="fastRefresh" />
+          1s
+        </label>
         <button type="button" id="btnRefresh">刷新</button>
         <button type="button" id="btnClear" class="danger">清空</button>
+        <button type="button" id="btnToggleFilters" class="ghost">筛选</button>
       </div>
     </header>
 
-    <section class="panel filters">
+    <section id="filterPanel" class="panel filters collapsed">
+      <div class="filter-group">
+        <span class="filter-title">视图</span>
+        <div id="presetRow" class="preset-row"></div>
+      </div>
       <div class="filter-group">
         <span class="filter-title">阶段</span>
         <div id="stageToggles" class="toggle-row"></div>
       </div>
-      <div class="filter-group">
-        <span class="filter-title">内容</span>
+      <div class="filter-group advanced-filters">
+        <span class="filter-title">字段</span>
         <div id="fieldToggles" class="toggle-row"></div>
       </div>
       <div class="filter-group">
         <span class="filter-title">选项</span>
-        <label class="inline"><input type="checkbox" id="optDiff" /> 高亮与上一步差异</label>
-        <label class="inline"><input type="checkbox" id="optCollapse" checked /> 默认折叠长文本</label>
+        <label class="inline"><input type="checkbox" id="optDiff" /> 高亮差异</label>
+        <label class="inline"><input type="checkbox" id="optCollapse" checked /> 折叠长文本</label>
         <input type="text" id="umoFilter" placeholder="过滤 umo / 发送者…" />
       </div>
     </section>
@@ -40,7 +52,10 @@
     <template id="traceTpl">
       <article class="trace-card">
         <header class="trace-head"></header>
-        <div class="trace-stages"></div>
+        <div class="trace-body">
+          <nav class="stage-tabs"></nav>
+          <div class="stage-panels"></div>
+        </div>
       </article>
     </template>
 

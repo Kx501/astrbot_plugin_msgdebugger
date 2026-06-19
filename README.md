@@ -5,47 +5,60 @@
 ## 功能
 
 1. **复读探针**：被动 `yield` 或主动 `send_message`，验证 MsgProcessor 等出站插件。
-2. **管线日志**：记录入站 → LLM 请求 → **消息注入** → LLM 响应 → 出站装饰 → 已发送，消息内容按类型格式化展示。
+2. **管线日志**：记录入站 → LLM 请求 → 消息注入 → LLM 响应 → 出站装饰 → 已发送。
+3. **抓包式持久化**：完整 trace 写入 `data/traces.jsonl`，重载插件后仍可查看。
+4. **运行时指令**：`/md echo|trace on|off|status|reset` 临时开关（重载后恢复配置默认）。
+
+## 指令
+
+| 指令 | 说明 |
+|------|------|
+| `/md echo on\|off\|status\|reset` | 控制复读探针 |
+| `/md trace on\|off\|status\|reset` | 控制管线日志记录 |
+
+`reset` 恢复为 WebUI 配置默认值。
 
 ## 查看日志
 
-1. 启用插件，确保 `trace_enabled` 为真（默认开启）。
-2. **重载插件**（首次添加 `pages/logs/` 后必须重载）。
-3. 打开 AstrBot WebUI → 插件 → MsgDebugger → 打开 Page **`logs`**。
-4. 发消息或触发 LLM 对话，页面每 3 秒自动刷新（可关）。
+1. 启用插件，确保 `trace_enabled` / `persist_traces` 为真（默认开启）。
+2. **重载插件**（首次添加或修改 `pages/logs/` 后必须重载）。
+3. 打开 AstrBot WebUI → 插件 → MsgDebugger → Page **`logs`**。
+4. 发消息或触发 LLM 对话；默认 **精简** 视图，可切换 **注入** / **完整**。
 
-> 日志 Page 需要 AstrBot **>= 4.24.2**（Plugin Pages / `register_web_api`）。若加载失败，请确认 AstrBot 版本并重载插件。
+页内特性：
 
-页内可切换：
+- **视图预设**：精简 / 注入 / 完整（字段开关存 localStorage）
+- **筛选栏**：默认折叠，点「筛选」展开
+- **Trace 卡片**：点击标题展开，阶段用 Tab 切换
+- **自动刷新**：默认 3s；可勾选 1s；切走 tab 暂停，回来立即拉取
 
-- **阶段**：入站 / LLM 请求 / **消息注入** / LLM 响应 / 出站 / 已发送
-- **内容**：各字段独立开关（Prompt、System、消息链等）
-- **选项**：差异高亮、长文本折叠、umo 过滤
-
-开关保存在浏览器 `localStorage`，刷新后仍有效。
-
-## 记录内容说明
+## 记录内容
 
 | 阶段 | 主要内容 |
 |------|----------|
-| 入站 | `message_str`、消息链分段 `[Plain]` `[Image]` … |
-| LLM 请求 | 注入完成后的 `prompt`（含 `<msg>` 拆解）、`system`、`extra` |
-| **消息注入** | 命中规则、完整注入文本、Prompt/System 注入前后对比 |
-| LLM 响应 | 回复文本、回复链、reasoning、token |
-| 出站装饰 | 出站链、纯文本预览（对比 MsgProcessor） |
-| 已发送 | 发送完成、复读模式 |
+| 入站 | 原始文本、消息链 |
+| LLM 请求 | 注入后的 `prompt` / `system` / `extra` |
+| 消息注入 | 命中规则、注入块、Prompt/System 增量（不重复 LLM 阶段全文） |
+| LLM 响应 | 回复、token、工具调用 |
+| 出站装饰 | 出站链、纯文本预览 |
+| 已发送 | 发送状态、复读模式 |
 
-`on_llm_request` 在 priority `100` 快照注入前请求，在 priority `-100` 记录注入后结果，便于对比 InfoInjection 等插件效果。
+`on_llm_request` 在 priority `100` 快照注入前，`-100` 记录注入后结果。
 
 ## 配置
 
-见 `_conf_schema.json`：`send_mode`、`echo_content`、白名单、`trace_enabled`、`max_trace_entries`。
+见 `_conf_schema.json`：
+
+- `echo_enabled` / `send_mode` / `echo_content` / 白名单
+- `trace_enabled` / `persist_traces` / `max_persist_entries` / `max_trace_entries`
+
+持久化文件路径：插件数据目录下 `traces.jsonl`（与 InfoInjection 同用 `StarTools.get_data_dir`）。
 
 ## 开发
 
 ```bash
 cd msgdebugger
-python -c "from core.trace_store import build_inbound_fields; print('ok')"
+python -c "from core.trace_store import TraceStore; print('ok')"
 ```
 
-新增或修改 `pages/logs/` 后需**重载插件**；仅改静态资源时刷新 Page 即可。
+新增或修改 `pages/logs/` 后需**重载插件**。

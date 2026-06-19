@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from .runtime import RUNTIME
 
 if TYPE_CHECKING:
+    from astrbot.api import AstrBotConfig
     from astrbot.api.star import Context
 
     from .trace_store import TraceStore
@@ -14,7 +17,11 @@ PLUGIN_NAME = "astrbot_plugin_msgdebugger"
 PAGE_PREFIX = f"/{PLUGIN_NAME}/page"
 
 
-def register_trace_page_routes(context: Context, store: TraceStore) -> bool:
+def register_trace_page_routes(
+    context: Context,
+    store: TraceStore,
+    cfg: AstrBotConfig | None = None,
+) -> bool:
     """注册 logs 页面 API；不可用时返回 False。"""
     register = getattr(context, "register_web_api", None)
     if not callable(register):
@@ -27,6 +34,11 @@ def register_trace_page_routes(context: Context, store: TraceStore) -> bool:
         store.clear()
         return {"status": "ok", "data": {"cleared": True}}
 
+    async def runtime_status() -> dict:
+        echo_cfg = bool(cfg.get("echo_enabled", True)) if cfg else True
+        trace_cfg = bool(cfg.get("trace_enabled", True)) if cfg else True
+        return {"status": "ok", "data": RUNTIME.snapshot(echo_cfg=echo_cfg, trace_cfg=trace_cfg)}
+
     register(
         f"{PAGE_PREFIX}/traces",
         list_traces,
@@ -38,5 +50,11 @@ def register_trace_page_routes(context: Context, store: TraceStore) -> bool:
         clear_traces,
         ["POST"],
         "Clear MsgDebugger pipeline traces",
+    )
+    register(
+        f"{PAGE_PREFIX}/runtime",
+        runtime_status,
+        ["GET"],
+        "MsgDebugger runtime flags",
     )
     return True

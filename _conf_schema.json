@@ -1,4 +1,10 @@
 {
+  "echo_enabled": {
+    "description": "复读探针",
+    "type": "bool",
+    "default": true,
+    "hint": "关闭后不再复读；可用 /md echo on|off 临时覆盖（重载插件后恢复）。"
+  },
   "send_mode": {
     "description": "发送方式",
     "type": "string",
@@ -31,12 +37,24 @@
     "description": "管线日志",
     "type": "bool",
     "default": true,
-    "hint": "记录入站、LLM 请求/响应、出站装饰、已发送等阶段，在插件 Page「logs」中查看。"
+    "hint": "记录入站、LLM 请求/响应、出站装饰、已发送等阶段；可用 /md trace on|off 临时覆盖。"
+  },
+  "persist_traces": {
+    "description": "持久化日志",
+    "type": "bool",
+    "default": true,
+    "hint": "将完整 trace 写入 data/traces.jsonl，重载插件后仍可查看（类似抓包合集）。"
+  },
+  "max_persist_entries": {
+    "description": "持久化条数上限",
+    "type": "int",
+    "default": 500,
+    "hint": "开启持久化时的最大保留条数；同时作为内存中可浏览条数上限。"
   },
   "max_trace_entries": {
-    "description": "日志条数上限",
+    "description": "内存条数上限",
     "type": "int",
     "default": 200,
-    "hint": "内存中保留的最近 trace 数量。"
+    "hint": "关闭 persist_traces 时，内存环形缓冲条数。"
   }
 }

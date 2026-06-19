@@ -4,15 +4,18 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 from typing import Any
 
 import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.provider import ProviderRequest
-from astrbot.api.star import Context, Star
+from astrbot.api.star import Context, Star, StarTools
+from astrbot.core.star.filter.command import GreedyStr
 
 from .core.page_api import register_trace_page_routes
+from .core.runtime import RUNTIME
 from .core.trace_store import (
     LLM_BEFORE_EXTRA,
     TraceStore,
@@ -90,6 +93,14 @@ def _echo_content(cfg: AstrBotConfig) -> str:
     return content if content in {"plain", "chain"} else "plain"
 
 
+def _echo_runtime_enabled(cfg: AstrBotConfig) -> bool:
+    return RUNTIME.echo_enabled(bool(cfg.get("echo_enabled", True)))
+
+
+def _trace_runtime_enabled(cfg: AstrBotConfig) -> bool:
+    return RUNTIME.trace_enabled(bool(cfg.get("trace_enabled", True)))
+
+
 def _build_chain(event: AstrMessageEvent, content_mode: str) -> list[Any]:
     if content_mode == "plain":
         text = event.message_str or ""
@@ -108,32 +119,62 @@ def _sender_name(event: AstrMessageEvent) -> str:
     return str(event.get_sender_id())
 
 
+def _parse_md_args(raw: str) -> tuple[str, str]:
+    parts = str(raw or "").strip().split()
+    if not parts:
+        return "", ""
+    if len(parts) == 1:
+        return parts[0].lower(), ""
+    return parts[0].lower(), parts[1].lower()
+
+
+def _apply_toggle(action: str) -> bool | None:
+    if action in {"on", "开", "enable", "1", "true"}:
+        return True
+    if action in {"off", "关", "disable", "0", "false"}:
+        return False
+    if action in {"reset", "default", "默认"}:
+        return None
+    return None
+
+
 class MsgDebuggerStar(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
         self.cfg = config
-        self._sync_store_limit()
+        self._data_dir = Path(StarTools.get_data_dir(None))
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+        self._sync_store()
         self._register_page_api()
+
+    def _sync_store(self) -> None:
+        persist = bool(self.cfg.get("persist_traces", True))
+        try:
+            persist_max = int(self.cfg.get("max_persist_entries") or 500)
+        except (TypeError, ValueError):
+            persist_max = 500
+        if persist:
+            _TRACE_STORE.configure_persist(
+                enabled=True,
+                path=self._data_dir / "traces.jsonl",
+                max_entries=persist_max,
+            )
+        else:
+            try:
+                limit = int(self.cfg.get("max_trace_entries") or 200)
+            except (TypeError, ValueError):
+                limit = 200
+            _TRACE_STORE.set_max_traces(limit)
 
     def _register_page_api(self) -> None:
         if not hasattr(self.context, "register_web_api"):
             logger.warning("MsgDebugger: 当前 AstrBot 不支持 register_web_api，日志 Page 不可用")
             return
         try:
-            if register_trace_page_routes(self.context, _TRACE_STORE):
+            if register_trace_page_routes(self.context, _TRACE_STORE, self.cfg):
                 logger.info("MsgDebugger: 已注册 logs 页面 API")
         except Exception:
             logger.exception("MsgDebugger: 注册 logs 页面 API 失败")
-
-    def _trace_enabled(self) -> bool:
-        return bool(self.cfg.get("trace_enabled", True))
-
-    def _sync_store_limit(self) -> None:
-        try:
-            limit = int(self.cfg.get("max_trace_entries") or 200)
-        except (TypeError, ValueError):
-            limit = 200
-        _TRACE_STORE.set_max_traces(limit)
 
     def _trace_meta(self, event: AstrMessageEvent) -> dict[str, str]:
         chat = "私聊" if event.is_private_chat() else "群聊"
@@ -154,15 +195,53 @@ class MsgDebuggerStar(Star):
         stage: str,
         fields: list[dict[str, Any]],
     ) -> None:
-        if not self._trace_enabled() or not fields:
+        if not _trace_runtime_enabled(self.cfg) or not fields:
             return
         trace_id = _TRACE_STORE.ensure_trace_id(event)
         _TRACE_STORE.begin_trace(trace_id, self._trace_meta(event))
         _TRACE_STORE.add_stage(trace_id, stage, fields)
 
+    @filter.command("md")
+    async def md_command(self, event: AstrMessageEvent, args: GreedyStr = "") -> None:
+        """MsgDebugger 控制：/md echo on|off|status，/md trace on|off|status"""
+        topic, action = _parse_md_args(str(args))
+        if topic == "echo":
+            if not action or action == "status":
+                status = RUNTIME.echo_status(bool(self.cfg.get("echo_enabled", True)))
+                active = "开" if _echo_runtime_enabled(self.cfg) else "关"
+                yield event.plain_result(f"复读：{status}（当前 {active}）")
+                return
+            value = _apply_toggle(action)
+            if value is None and action not in {"reset", "default", "默认"}:
+                yield event.plain_result("用法：/md echo on|off|status|reset")
+                return
+            RUNTIME.set_echo(value)
+            active = "开" if _echo_runtime_enabled(self.cfg) else "关"
+            yield event.plain_result(f"复读已设为 {RUNTIME.echo_status(bool(self.cfg.get('echo_enabled', True)))}（当前 {active}）")
+            return
+
+        if topic == "trace":
+            if not action or action == "status":
+                status = RUNTIME.trace_status(bool(self.cfg.get("trace_enabled", True)))
+                active = "开" if _trace_runtime_enabled(self.cfg) else "关"
+                yield event.plain_result(f"管线日志：{status}（当前 {active}）")
+                return
+            value = _apply_toggle(action)
+            if value is None and action not in {"reset", "default", "默认"}:
+                yield event.plain_result("用法：/md trace on|off|status|reset")
+                return
+            RUNTIME.set_trace(value)
+            active = "开" if _trace_runtime_enabled(self.cfg) else "关"
+            yield event.plain_result(
+                f"管线日志已设为 {RUNTIME.trace_status(bool(self.cfg.get('trace_enabled', True)))}（当前 {active}）"
+            )
+            return
+
+        yield event.plain_result("用法：/md echo|trace on|off|status|reset")
+
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_trace_inbound(self, event: AstrMessageEvent) -> None:
-        if not self._trace_enabled():
+        if not _trace_runtime_enabled(self.cfg):
             return
         if str(event.get_sender_id()) == str(event.get_self_id()):
             return
@@ -174,7 +253,7 @@ class MsgDebuggerStar(Star):
         event: AstrMessageEvent,
         req: ProviderRequest,
     ) -> None:
-        if not self._trace_enabled():
+        if not _trace_runtime_enabled(self.cfg):
             return
         event.set_extra(LLM_BEFORE_EXTRA, build_llm_before_snapshot(req))
 
@@ -184,7 +263,7 @@ class MsgDebuggerStar(Star):
         event: AstrMessageEvent,
         req: ProviderRequest,
     ) -> None:
-        if not self._trace_enabled():
+        if not _trace_runtime_enabled(self.cfg):
             return
         self._record_stage(event, "llm_request", build_llm_request_fields(event, req))
         injection_fields = build_injection_fields(event, req)
@@ -193,22 +272,22 @@ class MsgDebuggerStar(Star):
 
     @filter.on_llm_response()
     async def on_trace_llm_response(self, event: AstrMessageEvent, resp: Any) -> None:
-        if not self._trace_enabled():
+        if not _trace_runtime_enabled(self.cfg):
             return
         self._record_stage(event, "llm_response", build_llm_response_fields(resp))
 
     @filter.on_decorating_result()
     async def on_trace_decorating(self, event: AstrMessageEvent) -> None:
-        if not self._trace_enabled():
+        if not _trace_runtime_enabled(self.cfg):
             return
         self._record_stage(event, "decorating", build_decorating_fields(event))
 
     @filter.after_message_sent()
     async def on_trace_sent(self, event: AstrMessageEvent) -> None:
-        if not self._trace_enabled():
+        if not _trace_runtime_enabled(self.cfg):
             return
         echo_mode = None
-        if not _should_skip(event, self.cfg, self.context):
+        if _echo_runtime_enabled(self.cfg) and not _should_skip(event, self.cfg, self.context):
             echo_mode = _send_mode(self.cfg)
         self._record_stage(
             event,
@@ -219,6 +298,8 @@ class MsgDebuggerStar(Star):
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_passive_echo(self, event: AstrMessageEvent):
         """被动回复：yield 结果，经 ResultDecorate -> Respond 出站。"""
+        if not _echo_runtime_enabled(self.cfg):
+            return
         if _send_mode(self.cfg) != _SEND_PASSIVE or _should_skip(
             event, self.cfg, self.context
         ):
@@ -238,6 +319,8 @@ class MsgDebuggerStar(Star):
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_proactive_echo(self, event: AstrMessageEvent) -> None:
         """主动推送：context.send_message，不经被动回复管线。"""
+        if not _echo_runtime_enabled(self.cfg):
+            return
         if _send_mode(self.cfg) != _SEND_PROACTIVE or _should_skip(
             event, self.cfg, self.context
         ):

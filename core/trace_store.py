@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import copy
 import threading
 import time
 import uuid
 from collections import OrderedDict
+from pathlib import Path
 from typing import Any
 
 from .formatters import (
@@ -18,9 +20,11 @@ from .formatters import (
     pick_event_extras,
     summarize_text,
 )
+from .trace_persist import append_trace, clear_file, load_traces
 
 TRACE_EXTRA_KEY = "_md_trace_id"
 LLM_BEFORE_EXTRA = "_md_llm_before"
+_PERSIST_STAGE = "sent"
 
 
 class TraceStore:
@@ -28,15 +32,47 @@ class TraceStore:
         self._max = max(10, int(max_traces))
         self._lock = threading.Lock()
         self._traces: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._persist_enabled = False
+        self._persist_path: Path | None = None
+        self._persist_max = 500
+        self._persist_loaded = False
+
+    def configure_persist(
+        self,
+        *,
+        enabled: bool,
+        path: Path,
+        max_entries: int,
+    ) -> None:
+        with self._lock:
+            self._persist_enabled = enabled
+            self._persist_path = path
+            self._persist_max = max(10, int(max_entries))
+            if enabled and not self._persist_loaded:
+                self._load_persist_locked()
+                self._persist_loaded = True
+
+    def _load_persist_locked(self) -> None:
+        if not self._persist_path:
+            return
+        for trace in load_traces(self._persist_path, limit=self._persist_max):
+            trace_id = str(trace.get("id") or "")
+            if trace_id:
+                self._traces[trace_id] = trace
+        self._trim()
 
     def set_max_traces(self, max_traces: int) -> None:
-        self._max = max(10, int(max_traces))
+        if not self._persist_enabled:
+            self._max = max(10, int(max_traces))
         with self._lock:
-            self._trim()
+            if not self._persist_enabled:
+                self._trim()
 
     def clear(self) -> None:
         with self._lock:
             self._traces.clear()
+            if self._persist_enabled and self._persist_path:
+                clear_file(self._persist_path)
 
     def ensure_trace_id(self, event: Any) -> str:
         get_extra = getattr(event, "get_extra", None)
@@ -82,13 +118,25 @@ class TraceStore:
                     "fields": fields,
                 }
             )
+            if stage == _PERSIST_STAGE:
+                self._persist_trace_locked(trace)
+
+    def _persist_trace_locked(self, trace: dict[str, Any]) -> None:
+        if not self._persist_enabled or not self._persist_path:
+            return
+        append_trace(
+            self._persist_path,
+            copy.deepcopy(trace),
+            limit=self._persist_max,
+        )
 
     def list_traces(self) -> list[dict[str, Any]]:
         with self._lock:
             return list(reversed(self._traces.values()))
 
     def _trim(self) -> None:
-        while len(self._traces) > self._max:
+        cap = self._persist_max if self._persist_enabled else self._max
+        while len(self._traces) > cap:
             self._traces.popitem(last=False)
 
 
@@ -213,25 +261,18 @@ def build_injection_fields(event: Any, req: Any) -> list[dict[str, Any]]:
         )
 
     if before_prompt != after_prompt:
-        fields.append(_field("prompt_before", "Prompt（注入前）", "prompt", format_prompt(before_prompt)))
-        fields.append(_field("prompt_after", "Prompt（注入后）", "prompt", format_prompt(after_prompt)))
-    elif after_prompt:
         fields.append(
-            _field(
-                "prompt_unchanged",
-                "Prompt 变化",
-                "text",
-                "与注入前相同",
-            )
+            _field("prompt_before", "Prompt（注入前）", "prompt", format_prompt(before_prompt)),
         )
 
     if before_system != after_system:
         if after_system.startswith(before_system) and before_system:
             delta = after_system[len(before_system) :].strip()
             fields.append(_field("system_added", "System 追加", "system", format_system_prompt(delta)))
-        else:
-            fields.append(_field("system_before", "System（注入前）", "system", format_system_prompt(before_system)))
-            fields.append(_field("system_after", "System（注入后）", "system", format_system_prompt(after_system)))
+        elif before_system or after_system:
+            fields.append(
+                _field("system_diff", "System 变更", "system", format_system_prompt(after_system)),
+            )
 
     before_extras = before.get("extra_texts") if isinstance(before.get("extra_texts"), list) else []
     after_extras = format_extra_parts(getattr(req, "extra_user_content_parts", None))
@@ -247,17 +288,6 @@ def build_injection_fields(event: Any, req: Any) -> list[dict[str, Any]]:
                     [f"[+] {text}" for text in added],
                 )
             )
-
-    inbound = (getattr(event, "message_str", None) or "").strip()
-    if inbound and inbound != after_prompt and before_prompt == inbound:
-        fields.append(
-            _field(
-                "inbound_to_prompt",
-                "入站 → Prompt",
-                "lines",
-                [f"入站: {inbound}", f"最终: {after_prompt}"],
-            )
-        )
 
     return fields
 
