@@ -145,6 +145,8 @@ let ui = loadUi();
 let lastData = [];
 let lastSignature = "";
 let refreshTimer = null;
+let pollRunning = false;
+let pollGeneration = 0;
 const traceTabState = new Map();
 const traceCardExpanded = new Set();
 const fieldExpanded = new Set();
@@ -208,6 +210,13 @@ function renderToggle(container, entries, group) {
     input.dataset.key = key;
     input.dataset.group = group;
     input.checked = ui[group][key] !== false;
+    input.addEventListener("change", () => {
+      ui[group][key] = input.checked;
+      ui.preset = "custom";
+      saveUi();
+      syncPresetRadios();
+      renderTraces(lastData);
+    });
     wrap.append(input, document.createTextNode(label));
     container.append(wrap);
   }
@@ -234,6 +243,17 @@ function setupUiControls() {
   if (autoRefresh) autoRefresh.checked = ui.autoRefresh;
   if (fastRefresh) fastRefresh.checked = ui.fastRefresh;
   if (umoFilter) umoFilter.value = ui.umoFilter || "";
+  syncAutoRefreshFromDom();
+}
+
+function syncAutoRefreshFromDom() {
+  const autoRefresh = document.getElementById("autoRefresh");
+  if (autoRefresh) ui.autoRefresh = autoRefresh.checked;
+}
+
+function isAutoRefreshOn() {
+  syncAutoRefreshFromDom();
+  return ui.autoRefresh !== false;
 }
 
 function bindEvents() {
@@ -265,16 +285,13 @@ function bindEvents() {
   document.getElementById("autoRefresh")?.addEventListener("change", (e) => {
     ui.autoRefresh = e.target.checked;
     saveUi();
-    if (ui.autoRefresh) restartRefresh();
-    else if (refreshTimer) {
-      clearInterval(refreshTimer);
-      refreshTimer = null;
-    }
+    if (ui.autoRefresh) startPolling();
+    else stopPolling();
   });
   document.getElementById("fastRefresh")?.addEventListener("change", (e) => {
     ui.fastRefresh = e.target.checked;
     saveUi();
-    if (ui.autoRefresh) scheduleRefresh();
+    if (isAutoRefreshOn()) startPolling();
   });
   document.getElementById("umoFilter")?.addEventListener("input", (e) => {
     ui.umoFilter = e.target.value.trim();
@@ -518,25 +535,28 @@ function renderTraces(traces) {
 }
 
 function tracesSignature(traces) {
+  if (!traces.length) return "0";
   return traces
     .map((t) => {
       const stages = t.stages || [];
       const tail = stages.length ? stages[stages.length - 1] : null;
-      return `${t.id}:${stages.length}:${tail?.key || ""}:${tail?.at || ""}`;
+      return `${t.id}:${stages.length}:${tail?.key || ""}:${tail?.at || ""}:${t.summary || ""}`;
     })
     .join("|");
 }
 
 async function apiGet(path) {
   const res = await bridge.apiGet(path);
-  if (res && res.status === "ok" && res.data !== undefined) return res.data;
+  if (res && typeof res === "object" && res.status === "ok" && res.data !== undefined) {
+    return res.data;
+  }
   return res || {};
 }
 
 async function fetchTraces(options = {}) {
   const { force = false } = options;
   const data = await apiGet("page/traces");
-  const traces = data.traces || [];
+  const traces = Array.isArray(data.traces) ? data.traces : [];
   const sig = tracesSignature(traces);
   if (!force && sig === lastSignature) return false;
   lastSignature = sig;
@@ -545,29 +565,49 @@ async function fetchTraces(options = {}) {
   return true;
 }
 
-async function poll() {
-  await fetchTraces();
-  await fetchRuntime();
+async function pollOnce() {
+  if (pollRunning) return;
+  pollRunning = true;
+  try {
+    await fetchTraces();
+    await fetchRuntime();
+  } catch (err) {
+    console.error("MsgDebugger poll failed:", err);
+  } finally {
+    pollRunning = false;
+  }
 }
 
 function refreshIntervalMs() {
+  syncAutoRefreshFromDom();
   return ui.fastRefresh ? 1000 : 3000;
 }
 
-function scheduleRefresh() {
+function cancelScheduledPoll() {
   if (refreshTimer) {
-    clearInterval(refreshTimer);
+    clearTimeout(refreshTimer);
     refreshTimer = null;
   }
-  if (!ui.autoRefresh) return;
-  refreshTimer = setInterval(() => {
-    poll().catch(console.error);
-  }, refreshIntervalMs());
 }
 
-function restartRefresh() {
-  scheduleRefresh();
-  poll().catch(console.error);
+function stopPolling() {
+  pollGeneration += 1;
+  cancelScheduledPoll();
+}
+
+async function tickPoll(gen) {
+  if (gen !== pollGeneration || !isAutoRefreshOn()) return;
+  await pollOnce();
+  if (gen !== pollGeneration || !isAutoRefreshOn()) return;
+  refreshTimer = setTimeout(() => tickPoll(gen), refreshIntervalMs());
+}
+
+function startPolling() {
+  syncAutoRefreshFromDom();
+  stopPolling();
+  if (!isAutoRefreshOn()) return;
+  const gen = pollGeneration;
+  tickPoll(gen);
 }
 
 async function fetchRuntime() {
@@ -584,24 +624,11 @@ async function fetchRuntime() {
 async function clearTraces() {
   await bridge.apiPost("page/traces/clear", {});
   lastData = [];
-  lastSignature = "";
+  lastSignature = "0";
   traceCardExpanded.clear();
   fieldExpanded.clear();
   renderTraces([]);
 }
-
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") {
-    restartRefresh();
-  } else if (refreshTimer) {
-    clearInterval(refreshTimer);
-    refreshTimer = null;
-  }
-});
-
-window.addEventListener("focus", () => {
-  if (ui.autoRefresh) restartRefresh();
-});
 
 async function initPage() {
   if (!bridge?.ready) {
@@ -611,9 +638,17 @@ async function initPage() {
   bindEvents();
   setupUiControls();
   await bridge.ready();
-  await fetchTraces({ force: true });
-  await fetchRuntime();
-  restartRefresh();
+  try {
+    await fetchTraces({ force: true });
+    await fetchRuntime();
+  } catch (err) {
+    console.error("MsgDebugger init fetch failed:", err);
+  }
+  startPolling();
 }
+
+window.addEventListener("focus", () => {
+  if (isAutoRefreshOn()) pollOnce().catch(console.error);
+});
 
 initPage().catch(console.error);
