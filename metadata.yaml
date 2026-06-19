@@ -1,6 +1,6 @@
 name: astrbot_plugin_msgdebugger
 display_name: MsgDebugger
-version: "1.1.1"
+version: "1.1.2"
 author: "Kx501"
 desc: 复读用户消息并记录管线各阶段格式化日志，用于调试主被动出站与 LLM 注入。
 astrbot_version: ">=4.24.2"

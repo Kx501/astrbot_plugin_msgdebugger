@@ -5,7 +5,7 @@
 ## 功能
 
 1. **复读探针**：被动 `yield` 或主动 `send_message`，验证 MsgProcessor 等出站插件。
-2. **管线日志**：记录入站 → LLM 请求 → LLM 响应 → 出站装饰 → 已发送，消息内容按类型格式化展示。
+2. **管线日志**：记录入站 → LLM 请求 → **消息注入** → LLM 响应 → 出站装饰 → 已发送，消息内容按类型格式化展示。
 
 ## 查看日志
 
@@ -18,7 +18,7 @@
 
 页内可切换：
 
-- **阶段**：入站 / LLM 请求 / LLM 响应 / 出站 / 已发送
+- **阶段**：入站 / LLM 请求 / **消息注入** / LLM 响应 / 出站 / 已发送
 - **内容**：各字段独立开关（Prompt、System、消息链等）
 - **选项**：差异高亮、长文本折叠、umo 过滤
 
@@ -29,12 +29,13 @@
 | 阶段 | 主要内容 |
 |------|----------|
 | 入站 | `message_str`、消息链分段 `[Plain]` `[Image]` … |
-| LLM 请求 | `prompt`（含 `<msg>` 拆解）、`system` 分段、`extra`、`_ii_injected` 等 |
+| LLM 请求 | 注入完成后的 `prompt`（含 `<msg>` 拆解）、`system`、`extra` |
+| **消息注入** | 命中规则、完整注入文本、Prompt/System 注入前后对比 |
 | LLM 响应 | 回复文本、回复链、reasoning、token |
 | 出站装饰 | 出站链、纯文本预览（对比 MsgProcessor） |
 | 已发送 | 发送完成、复读模式 |
 
-`on_llm_request` 使用较低优先级，尽量记录 InfoInjection 等插件修改后的最终请求。
+`on_llm_request` 在 priority `100` 快照注入前请求，在 priority `-100` 记录注入后结果，便于对比 InfoInjection 等插件效果。
 
 ## 配置
 

@@ -20,6 +20,7 @@ from .formatters import (
 )
 
 TRACE_EXTRA_KEY = "_md_trace_id"
+LLM_BEFORE_EXTRA = "_md_llm_before"
 
 
 class TraceStore:
@@ -110,6 +111,20 @@ def build_inbound_fields(event: Any) -> list[dict[str, Any]]:
     ]
 
 
+def build_llm_before_snapshot(req: Any) -> dict[str, Any]:
+    extra_parts = getattr(req, "extra_user_content_parts", None) or []
+    extra_texts: list[str] = []
+    for part in extra_parts:
+        text = getattr(part, "text", None)
+        if isinstance(text, str):
+            extra_texts.append(text)
+    return {
+        "prompt": (getattr(req, "prompt", None) or "").strip(),
+        "system_prompt": (getattr(req, "system_prompt", None) or "").strip(),
+        "extra_texts": extra_texts,
+    }
+
+
 def build_llm_request_fields(event: Any, req: Any) -> list[dict[str, Any]]:
     prompt = format_prompt(getattr(req, "prompt", None))
     system = format_system_prompt(getattr(req, "system_prompt", None))
@@ -135,6 +150,114 @@ def build_llm_request_fields(event: Any, req: Any) -> list[dict[str, Any]]:
         fields.append(_field("images", "图片", "lines", [str(u) for u in image_urls]))
     if audio_urls:
         fields.append(_field("audios", "音频", "lines", [str(u) for u in audio_urls]))
+
+    return fields
+
+
+def build_injection_fields(event: Any, req: Any) -> list[dict[str, Any]]:
+    """对比注入前后，展示 InfoInjection 等插件写入的内容。"""
+    get_extra = getattr(event, "get_extra", None)
+    before: dict[str, Any] = {}
+    if callable(get_extra):
+        raw = get_extra(LLM_BEFORE_EXTRA)
+        if isinstance(raw, dict):
+            before = raw
+
+    after_prompt = (getattr(req, "prompt", None) or "").strip()
+    after_system = (getattr(req, "system_prompt", None) or "").strip()
+    before_prompt = str(before.get("prompt") or "").strip()
+    before_system = str(before.get("system_prompt") or "").strip()
+
+    fields: list[dict[str, Any]] = []
+
+    ii = None
+    if callable(get_extra):
+        ii = get_extra("_ii_injected")
+
+    if isinstance(ii, dict) and ii.get("blocks"):
+        rule_ids = ii.get("rule_ids") or []
+        fields.append(
+            _field(
+                "injection_rules",
+                "命中规则",
+                "lines",
+                [str(rid) for rid in rule_ids],
+            )
+        )
+        block_lines: list[str] = []
+        for block in ii.get("blocks") or []:
+            if not isinstance(block, dict):
+                continue
+            rid = block.get("rule_id", "?")
+            pos = block.get("position", "?")
+            eph = "temp" if block.get("ephemeral") else "persist"
+            text = str(block.get("text") or "")
+            if not text and block.get("text_len"):
+                text = f"(仅记录长度 {block['text_len']})"
+            block_lines.append(f"[{rid}] {pos} ({eph})\n{text}")
+        if block_lines:
+            fields.append(
+                _field("injection_blocks", "注入内容", "lines", block_lines),
+            )
+        date = ii.get("date")
+        if date:
+            fields.append(_field("injection_date", "注入日", "text", str(date)))
+    else:
+        fields.append(
+            _field(
+                "injection_status",
+                "注入状态",
+                "text",
+                "本轮无 InfoInjection 记录（可能未注入或插件未启用）",
+            )
+        )
+
+    if before_prompt != after_prompt:
+        fields.append(_field("prompt_before", "Prompt（注入前）", "prompt", format_prompt(before_prompt)))
+        fields.append(_field("prompt_after", "Prompt（注入后）", "prompt", format_prompt(after_prompt)))
+    elif after_prompt:
+        fields.append(
+            _field(
+                "prompt_unchanged",
+                "Prompt 变化",
+                "text",
+                "与注入前相同",
+            )
+        )
+
+    if before_system != after_system:
+        if after_system.startswith(before_system) and before_system:
+            delta = after_system[len(before_system) :].strip()
+            fields.append(_field("system_added", "System 追加", "system", format_system_prompt(delta)))
+        else:
+            fields.append(_field("system_before", "System（注入前）", "system", format_system_prompt(before_system)))
+            fields.append(_field("system_after", "System（注入后）", "system", format_system_prompt(after_system)))
+
+    before_extras = before.get("extra_texts") if isinstance(before.get("extra_texts"), list) else []
+    after_extras = format_extra_parts(getattr(req, "extra_user_content_parts", None))
+    after_texts = [row.get("text", "") for row in after_extras]
+    if before_extras != after_texts:
+        added = [t for t in after_texts if t not in before_extras]
+        if added:
+            fields.append(
+                _field(
+                    "extra_added",
+                    "Extra 新增",
+                    "lines",
+                    [f"[+] {text}" for text in added],
+                )
+            )
+
+    inbound = (getattr(event, "message_str", None) or "").strip()
+    if inbound and inbound != after_prompt and before_prompt == inbound:
+        fields.append(
+            _field(
+                "inbound_to_prompt",
+                "入站 → Prompt",
+                "lines",
+                [f"入站: {inbound}", f"最终: {after_prompt}"],
+            )
+        )
 
     return fields
 

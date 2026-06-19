@@ -14,9 +14,12 @@ from astrbot.api.star import Context, Star
 
 from .core.page_api import register_trace_page_routes
 from .core.trace_store import (
+    LLM_BEFORE_EXTRA,
     TraceStore,
     build_decorating_fields,
     build_inbound_fields,
+    build_injection_fields,
+    build_llm_before_snapshot,
     build_llm_request_fields,
     build_llm_response_fields,
     build_sent_fields,
@@ -165,6 +168,16 @@ class MsgDebuggerStar(Star):
             return
         self._record_stage(event, "inbound", build_inbound_fields(event))
 
+    @filter.on_llm_request(priority=100)
+    async def on_trace_llm_request_before(
+        self,
+        event: AstrMessageEvent,
+        req: ProviderRequest,
+    ) -> None:
+        if not self._trace_enabled():
+            return
+        event.set_extra(LLM_BEFORE_EXTRA, build_llm_before_snapshot(req))
+
     @filter.on_llm_request(priority=-100)
     async def on_trace_llm_request(
         self,
@@ -174,6 +187,9 @@ class MsgDebuggerStar(Star):
         if not self._trace_enabled():
             return
         self._record_stage(event, "llm_request", build_llm_request_fields(event, req))
+        injection_fields = build_injection_fields(event, req)
+        if injection_fields:
+            self._record_stage(event, "injection", injection_fields)
 
     @filter.on_llm_response()
     async def on_trace_llm_response(self, event: AstrMessageEvent, resp: Any) -> None:
