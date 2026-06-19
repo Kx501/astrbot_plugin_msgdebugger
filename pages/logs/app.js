@@ -141,7 +141,8 @@ const presetRow = document.getElementById("presetRow");
 const filterDetails = document.getElementById("filterDetails");
 const runtimeBadge = document.getElementById("runtimeBadge");
 
-let ui = loadUi();
+let ui = cloneUi(DEFAULT_UI);
+let saveUiTimer = null;
 let lastData = [];
 let lastSignature = "";
 let refreshTimer = null;
@@ -160,31 +161,78 @@ function asBool(value, fallback) {
   return fallback;
 }
 
-function loadUi() {
+function normalizeUi(raw) {
+  const merged = { ...cloneUi(DEFAULT_UI), ...(raw || {}) };
+  merged.stages = { ...DEFAULT_UI.stages, ...(raw?.stages || {}) };
+  merged.fields = { ...DEFAULT_UI.fields, ...(raw?.fields || {}) };
+  merged.filtersOpen = asBool(raw?.filtersOpen, DEFAULT_UI.filtersOpen);
+  merged.optDiff = asBool(raw?.optDiff, DEFAULT_UI.optDiff);
+  merged.optCollapse = asBool(raw?.optCollapse, DEFAULT_UI.optCollapse);
+  merged.autoRefresh = asBool(raw?.autoRefresh, DEFAULT_UI.autoRefresh);
+  merged.fastRefresh = asBool(raw?.fastRefresh, DEFAULT_UI.fastRefresh);
+  merged.umoFilter = typeof raw?.umoFilter === "string" ? raw.umoFilter : "";
+  if (merged.preset !== "custom" && !PRESETS[merged.preset]) {
+    merged.preset = "compact";
+  }
+  return merged;
+}
+
+function loadUiFromStorage() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return cloneUi(DEFAULT_UI);
-    const parsed = JSON.parse(raw);
-    const merged = { ...cloneUi(DEFAULT_UI), ...parsed };
-    merged.stages = { ...DEFAULT_UI.stages, ...(parsed.stages || {}) };
-    merged.fields = { ...DEFAULT_UI.fields, ...(parsed.fields || {}) };
-    merged.filtersOpen = asBool(parsed.filtersOpen, false);
-    merged.optDiff = asBool(parsed.optDiff, DEFAULT_UI.optDiff);
-    merged.optCollapse = asBool(parsed.optCollapse, DEFAULT_UI.optCollapse);
-    merged.autoRefresh = asBool(parsed.autoRefresh, DEFAULT_UI.autoRefresh);
-    merged.fastRefresh = asBool(parsed.fastRefresh, DEFAULT_UI.fastRefresh);
-    return merged;
+    return normalizeUi(JSON.parse(raw));
   } catch {
     return cloneUi(DEFAULT_UI);
   }
 }
 
-function saveUi() {
+function serializeUiState() {
+  return {
+    preset: ui.preset,
+    stages: ui.stages,
+    fields: ui.fields,
+    optDiff: ui.optDiff,
+    optCollapse: ui.optCollapse,
+    autoRefresh: ui.autoRefresh,
+    fastRefresh: ui.fastRefresh,
+    filtersOpen: ui.filtersOpen,
+    umoFilter: ui.umoFilter || "",
+  };
+}
+
+async function loadUiState() {
+  const local = loadUiFromStorage();
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(ui));
+    await ensureBridgeReady();
+    const data = await apiGet("page/ui-state");
+    const remote = data?.ui;
+    if (remote && typeof remote === "object" && Object.keys(remote).length) {
+      return normalizeUi(remote);
+    }
+  } catch {
+    /* fallback to local */
+  }
+  return local;
+}
+
+function saveUi() {
+  const payload = serializeUiState();
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   } catch {
     /* sandbox iframe may block storage */
   }
+  clearTimeout(saveUiTimer);
+  saveUiTimer = setTimeout(() => {
+    persistUiState(payload).catch(() => {});
+  }, 400);
+}
+
+async function persistUiState(payload) {
+  await ensureBridgeReady();
+  if (!bridge?.apiPost) return;
+  await bridge.apiPost("page/ui-state", { ui: payload || serializeUiState() });
 }
 
 function applyPreset(name) {
@@ -655,6 +703,11 @@ async function clearTraces() {
 
 async function initPage() {
   bindEvents();
+  try {
+    ui = await loadUiState();
+  } catch {
+    ui = loadUiFromStorage();
+  }
   setupUiControls();
 
   if (typeof bridge?.onContext === "function") {
@@ -672,6 +725,11 @@ async function initPage() {
   }
   startPolling();
 }
+
+window.addEventListener("pagehide", () => {
+  clearTimeout(saveUiTimer);
+  persistUiState().catch(() => {});
+});
 
 window.addEventListener("focus", () => {
   if (isAutoRefreshOn()) refreshNow().catch(console.error);

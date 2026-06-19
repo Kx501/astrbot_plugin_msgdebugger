@@ -190,7 +190,12 @@ class MsgDebuggerStar(Star):
             logger.warning("MsgDebugger: 当前 AstrBot 不支持 register_web_api，日志 Page 不可用")
             return
         try:
-            if register_trace_page_routes(self.context, _TRACE_STORE, self.cfg):
+            if register_trace_page_routes(
+                self.context,
+                _TRACE_STORE,
+                self.cfg,
+                data_dir=self._plugin_data_dir(),
+            ):
                 logger.info("MsgDebugger: 已注册 logs 页面 API")
         except Exception:
             logger.exception("MsgDebugger: 注册 logs 页面 API 失败")

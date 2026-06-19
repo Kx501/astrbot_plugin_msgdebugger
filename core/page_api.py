@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .runtime import RUNTIME
+from .ui_state import load_ui_state, save_ui_state
 
 if TYPE_CHECKING:
     from astrbot.api import AstrBotConfig
@@ -21,6 +23,8 @@ def register_trace_page_routes(
     context: Context,
     store: TraceStore,
     cfg: AstrBotConfig | None = None,
+    *,
+    data_dir: Path | None = None,
 ) -> bool:
     """注册 logs 页面 API；不可用时返回 False。"""
     register = getattr(context, "register_web_api", None)
@@ -37,6 +41,23 @@ def register_trace_page_routes(
     async def runtime_status() -> dict:
         echo_cfg = bool(cfg.get("echo_enabled", True)) if cfg else True
         return {"status": "ok", "data": RUNTIME.snapshot(echo_cfg=echo_cfg)}
+
+    ui_state_path = (data_dir / "logs_ui.json") if data_dir else None
+
+    async def get_ui_state() -> dict:
+        ui = load_ui_state(ui_state_path) if ui_state_path else {}
+        return {"status": "ok", "data": {"ui": ui}}
+
+    async def post_ui_state() -> dict:
+        if not ui_state_path:
+            return {"status": "error", "message": "UI state path unavailable"}
+        try:
+            from astrbot.api.web import request as plugin_request
+        except ImportError:
+            return {"status": "error", "message": "web request unavailable"}
+        body = await plugin_request.json({}) or {}
+        save_ui_state(ui_state_path, body)
+        return {"status": "ok", "data": {"saved": True}}
 
     register(
         f"{PAGE_PREFIX}/traces",
@@ -55,5 +76,17 @@ def register_trace_page_routes(
         runtime_status,
         ["GET"],
         "MsgDebugger runtime flags",
+    )
+    register(
+        f"{PAGE_PREFIX}/ui-state",
+        get_ui_state,
+        ["GET"],
+        "MsgDebugger logs page UI state",
+    )
+    register(
+        f"{PAGE_PREFIX}/ui-state",
+        post_ui_state,
+        ["POST"],
+        "Save MsgDebugger logs page UI state",
     )
     return True
