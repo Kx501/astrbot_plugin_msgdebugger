@@ -129,6 +129,7 @@ const DEFAULT_UI = {
   optCollapse: true,
   autoRefresh: true,
   fastRefresh: false,
+  autoScroll: true,
   filtersOpen: false,
   umoFilter: "",
 };
@@ -145,6 +146,7 @@ let ui = cloneUi(DEFAULT_UI);
 let saveUiTimer = null;
 let lastData = [];
 let lastSignature = "";
+let prevTopTraceId = "";
 let refreshTimer = null;
 const traceTabState = new Map();
 const traceCardExpanded = new Set();
@@ -170,6 +172,7 @@ function normalizeUi(raw) {
   merged.optCollapse = asBool(raw?.optCollapse, DEFAULT_UI.optCollapse);
   merged.autoRefresh = asBool(raw?.autoRefresh, DEFAULT_UI.autoRefresh);
   merged.fastRefresh = asBool(raw?.fastRefresh, DEFAULT_UI.fastRefresh);
+  merged.autoScroll = asBool(raw?.autoScroll, DEFAULT_UI.autoScroll);
   merged.umoFilter = typeof raw?.umoFilter === "string" ? raw.umoFilter : "";
   if (merged.preset !== "custom" && !PRESETS[merged.preset]) {
     merged.preset = "compact";
@@ -196,6 +199,7 @@ function serializeUiState() {
     optCollapse: ui.optCollapse,
     autoRefresh: ui.autoRefresh,
     fastRefresh: ui.fastRefresh,
+    autoScroll: ui.autoScroll,
     filtersOpen: ui.filtersOpen,
     umoFilter: ui.umoFilter || "",
   };
@@ -297,12 +301,14 @@ function setupUiControls() {
   const optCollapse = document.getElementById("optCollapse");
   const autoRefresh = document.getElementById("autoRefresh");
   const fastRefresh = document.getElementById("fastRefresh");
+  const autoScroll = document.getElementById("autoScroll");
   const umoFilter = document.getElementById("umoFilter");
 
   if (optDiff) optDiff.checked = ui.optDiff;
   if (optCollapse) optCollapse.checked = ui.optCollapse;
   if (autoRefresh) autoRefresh.checked = ui.autoRefresh;
   if (fastRefresh) fastRefresh.checked = ui.fastRefresh;
+  if (autoScroll) autoScroll.checked = ui.autoScroll;
   if (umoFilter) umoFilter.value = ui.umoFilter || "";
   syncAutoRefreshFromDom();
 }
@@ -355,6 +361,10 @@ function bindEvents() {
   document.getElementById("fastRefresh")?.addEventListener("change", (e) => {
     ui.fastRefresh = e.target.checked;
     if (isAutoRefreshOn()) startPolling();
+    saveUi();
+  });
+  document.getElementById("autoScroll")?.addEventListener("change", (e) => {
+    ui.autoScroll = e.target.checked;
     saveUi();
   });
   document.getElementById("umoFilter")?.addEventListener("input", (e) => {
@@ -511,7 +521,25 @@ function visibleStages(trace) {
   return result;
 }
 
-function renderTraces(traces) {
+function isNearTop(threshold = 96) {
+  return window.scrollY <= threshold;
+}
+
+function maybeAutoScroll(traces, scrollHint) {
+  if (!ui.autoScroll || scrollHint !== "data") return;
+  const topId = traces[0]?.id || "";
+  const newTop = Boolean(topId && prevTopTraceId && topId !== prevTopTraceId);
+  const prev = prevTopTraceId;
+  prevTopTraceId = topId;
+  if (!prev) return;
+  if (newTop || isNearTop()) {
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, behavior: newTop ? "smooth" : "auto" });
+    });
+  }
+}
+
+function renderTraces(traces, scrollHint = "filter") {
   if (!traceList) return;
   traceList.innerHTML = "";
   const needle = (ui.umoFilter || "").toLowerCase();
@@ -528,6 +556,7 @@ function renderTraces(traces) {
     empty.className = "empty";
     empty.textContent = "暂无记录。发消息后应自动出现；也可点「刷新」。";
     traceList.append(empty);
+    prevTopTraceId = "";
     return;
   }
 
@@ -595,6 +624,7 @@ function renderTraces(traces) {
     head.querySelector(".expand-hint").textContent = cardOpen ? "▾" : "▸";
     traceList.append(card);
   }
+  maybeAutoScroll(traces, scrollHint);
 }
 
 function tracesSignature(traces) {
@@ -650,7 +680,7 @@ async function fetchTraces(options = {}) {
   if (!force && sig === lastSignature) return false;
   lastSignature = sig;
   lastData = traces;
-  renderTraces(lastData);
+  renderTraces(lastData, "data");
   return true;
 }
 
@@ -696,6 +726,7 @@ async function clearTraces() {
   await bridge.apiPost("page/traces/clear", {});
   lastData = [];
   lastSignature = "0";
+  prevTopTraceId = "";
   traceCardExpanded.clear();
   fieldExpanded.clear();
   renderTraces([]);

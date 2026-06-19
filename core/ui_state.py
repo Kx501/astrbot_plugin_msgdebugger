@@ -16,6 +16,7 @@ _UI_KEYS = frozenset(
         "optCollapse",
         "autoRefresh",
         "fastRefresh",
+        "autoScroll",
         "filtersOpen",
         "umoFilter",
     }
