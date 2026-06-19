@@ -6,7 +6,7 @@
 
 1. **复读探针**：被动 `yield` 或主动 `send_message`，验证 MsgProcessor 等出站插件。
 2. **管线日志**：记录入站 → LLM 请求 → 消息注入 → LLM 响应 → 出站装饰 → 已发送。
-3. **抓包式持久化**：完整 trace 写入 `data/traces.jsonl`，重载插件后仍可查看。
+3. **抓包式持久化**：完整 trace 落盘，重载插件后仍可查看。
 4. **运行时指令**：`/md echo|trace on|off|status|reset` 临时开关（重载后恢复配置默认）。
 
 ## 指令
@@ -51,8 +51,6 @@
 
 - `echo_enabled` / `send_mode` / `echo_content` / 白名单
 - `trace_enabled` / `persist_traces` / `max_persist_entries` / `max_trace_entries`
-
-持久化文件路径：插件数据目录下 `traces.jsonl`（与 InfoInjection 同用 `StarTools.get_data_dir`）。
 
 ## 开发
 

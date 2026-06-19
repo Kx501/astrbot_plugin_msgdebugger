@@ -91,13 +91,13 @@ button.ghost {
   background: transparent;
 }
 
-.panel {
+.panel.filters-panel {
   margin: 0 8px 8px;
   padding: 10px 12px;
 }
 
-.panel.collapsed {
-  display: none;
+.panel.filters-panel[hidden] {
+  display: none !important;
 }
 
 .filter-group + .filter-group {

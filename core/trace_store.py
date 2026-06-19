@@ -35,7 +35,6 @@ class TraceStore:
         self._persist_enabled = False
         self._persist_path: Path | None = None
         self._persist_max = 500
-        self._persist_loaded = False
 
     def configure_persist(
         self,
@@ -48,9 +47,8 @@ class TraceStore:
             self._persist_enabled = enabled
             self._persist_path = path
             self._persist_max = max(10, int(max_entries))
-            if enabled and not self._persist_loaded:
+            if enabled:
                 self._load_persist_locked()
-                self._persist_loaded = True
 
     def _load_persist_locked(self) -> None:
         if not self._persist_path:

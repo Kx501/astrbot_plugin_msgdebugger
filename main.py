@@ -142,10 +142,11 @@ class MsgDebuggerStar(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
         self.cfg = config
-        self._data_dir = Path(StarTools.get_data_dir(None))
-        self._data_dir.mkdir(parents=True, exist_ok=True)
         self._sync_store()
         self._register_page_api()
+
+    def _plugin_data_dir(self) -> Path:
+        return StarTools.get_data_dir(PLUGIN_NAME)
 
     def _sync_store(self) -> None:
         persist = bool(self.cfg.get("persist_traces", True))
@@ -156,7 +157,7 @@ class MsgDebuggerStar(Star):
         if persist:
             _TRACE_STORE.configure_persist(
                 enabled=True,
-                path=self._data_dir / "traces.jsonl",
+                path=self._plugin_data_dir() / "traces.jsonl",
                 max_entries=persist_max,
             )
         else:

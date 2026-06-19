@@ -139,12 +139,16 @@ const stageToggles = document.getElementById("stageToggles");
 const fieldToggles = document.getElementById("fieldToggles");
 const presetRow = document.getElementById("presetRow");
 const filterPanel = document.getElementById("filterPanel");
+const btnToggleFilters = document.getElementById("btnToggleFilters");
 const runtimeBadge = document.getElementById("runtimeBadge");
 
 let ui = loadUi();
 let lastData = [];
+let lastSignature = "";
 let refreshTimer = null;
 const traceTabState = new Map();
+const traceCardExpanded = new Set();
+const fieldExpanded = new Set();
 
 function loadUi() {
   try {
@@ -220,6 +224,12 @@ function renderToggle(container, entries, group) {
   }
 }
 
+function syncFilterPanel() {
+  if (!filterPanel || !btnToggleFilters) return;
+  filterPanel.hidden = !ui.filtersOpen;
+  btnToggleFilters.textContent = ui.filtersOpen ? "筛选 ▴" : "筛选 ▾";
+}
+
 function setupToggles() {
   renderPresetButtons();
   renderToggle(stageToggles, Object.entries(STAGE_LABELS), "stages");
@@ -230,7 +240,7 @@ function setupToggles() {
   document.getElementById("autoRefresh").checked = ui.autoRefresh;
   document.getElementById("fastRefresh").checked = ui.fastRefresh;
   document.getElementById("umoFilter").value = ui.umoFilter || "";
-  filterPanel.classList.toggle("collapsed", !ui.filtersOpen);
+  syncFilterPanel();
 }
 
 function bindToolbarEvents() {
@@ -260,10 +270,10 @@ function bindToolbarEvents() {
     saveUi();
     renderTraces(lastData);
   });
-  document.getElementById("btnToggleFilters").addEventListener("click", () => {
+  btnToggleFilters?.addEventListener("click", () => {
     ui.filtersOpen = !ui.filtersOpen;
     saveUi();
-    filterPanel.classList.toggle("collapsed", !ui.filtersOpen);
+    syncFilterPanel();
   });
 }
 
@@ -281,9 +291,11 @@ function stagePlainText(stage) {
   return chunks.join("\n").trim();
 }
 
-function renderFieldBody(field, diff) {
+function renderFieldBody(field, diff, fieldKey) {
+  const expanded = fieldExpanded.has(fieldKey);
   const wrap = document.createElement("div");
-  wrap.className = "field-body" + (ui.optCollapse ? " collapsed" : "");
+  const shouldCollapse = ui.optCollapse && !expanded;
+  wrap.className = "field-body" + (shouldCollapse ? " collapsed" : "");
   if (diff) wrap.classList.add("diff");
 
   if (field.format === "lines") {
@@ -331,10 +343,17 @@ function renderFieldBody(field, diff) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "expand-btn";
-    btn.textContent = "展开";
-    btn.addEventListener("click", () => {
+    btn.textContent = expanded ? "收起" : "展开";
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
       const collapsed = wrap.classList.toggle("collapsed");
-      btn.textContent = collapsed ? "展开" : "收起";
+      if (collapsed) {
+        fieldExpanded.delete(fieldKey);
+        btn.textContent = "展开";
+      } else {
+        fieldExpanded.add(fieldKey);
+        btn.textContent = "收起";
+      }
     });
     return { wrap, extra: btn };
   }
@@ -426,7 +445,8 @@ function renderTraces(traces) {
           ui.optDiff &&
           stageDiff &&
           ["completion", "plain", "chain", "prompt"].includes(field.key);
-        const { wrap, extra } = renderFieldBody(field, fieldDiff);
+        const fieldKey = `${trace.id}:${field.key}`;
+        const { wrap, extra } = renderFieldBody(field, fieldDiff, fieldKey);
         fieldEl.append(wrap);
         if (extra) fieldEl.append(extra);
         panel.append(fieldEl);
@@ -437,14 +457,34 @@ function renderTraces(traces) {
     }
 
     head.addEventListener("click", () => {
-      card.classList.toggle("collapsed");
+      const collapsed = card.classList.toggle("collapsed");
+      if (collapsed) {
+        traceCardExpanded.delete(trace.id);
+      } else {
+        traceCardExpanded.add(trace.id);
+      }
       const hint = head.querySelector(".expand-hint");
-      if (hint) hint.textContent = card.classList.contains("collapsed") ? "▸" : "▾";
+      if (hint) hint.textContent = collapsed ? "▸" : "▾";
     });
 
-    card.classList.add("collapsed");
+    const cardOpen = traceCardExpanded.has(trace.id);
+    if (!cardOpen) card.classList.add("collapsed");
+    else {
+      const hint = head.querySelector(".expand-hint");
+      if (hint) hint.textContent = "▾";
+    }
     traceList.append(card);
   }
+}
+
+function tracesSignature(traces) {
+  return traces
+    .map((t) => {
+      const stages = t.stages || [];
+      const tail = stages.length ? stages[stages.length - 1] : null;
+      return `${t.id}:${stages.length}:${tail?.key || ""}:${tail?.at || ""}`;
+    })
+    .join("|");
 }
 
 function escapeHtml(text) {
@@ -462,7 +502,11 @@ async function apiGet(path) {
 
 async function fetchTraces() {
   const data = await apiGet("page/traces");
-  lastData = data.traces || [];
+  const traces = data.traces || [];
+  const sig = tracesSignature(traces);
+  if (sig === lastSignature) return;
+  lastSignature = sig;
+  lastData = traces;
   renderTraces(lastData);
 }
 
@@ -480,6 +524,9 @@ async function fetchRuntime() {
 async function clearTraces() {
   await bridge.apiPost("page/traces/clear", {});
   lastData = [];
+  lastSignature = "";
+  traceCardExpanded.clear();
+  fieldExpanded.clear();
   renderTraces([]);
 }
 
@@ -502,6 +549,7 @@ function scheduleRefresh() {
 }
 
 document.getElementById("btnRefresh").addEventListener("click", () => {
+  lastSignature = "";
   fetchTraces().catch(console.error);
   fetchRuntime().catch(console.error);
 });
