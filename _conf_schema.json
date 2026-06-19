@@ -26,5 +26,17 @@
     "type": "list",
     "default": [],
     "hint": "留空不限制；填写后仅复读对应用户的消息。"
+  },
+  "trace_enabled": {
+    "description": "管线日志",
+    "type": "bool",
+    "default": true,
+    "hint": "记录入站、LLM 请求/响应、出站装饰、已发送等阶段，在插件 Page「logs」中查看。"
+  },
+  "max_trace_entries": {
+    "description": "日志条数上限",
+    "type": "int",
+    "default": 200,
+    "hint": "内存中保留的最近 trace 数量。"
   }
 }

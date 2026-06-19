@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""复读用户消息，用于调试被动回复与主动推送能否被其他插件处理。"""
+"""复读用户消息，并记录管线各阶段格式化日志。"""
 
 from __future__ import annotations
 
@@ -9,10 +9,23 @@ from typing import Any
 import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
+from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star
+from astrbot.api.web import json_response
 
+from .core.trace_store import (
+    TraceStore,
+    build_decorating_fields,
+    build_inbound_fields,
+    build_llm_request_fields,
+    build_llm_response_fields,
+    build_sent_fields,
+)
+
+PLUGIN_NAME = "astrbot_plugin_msgdebugger"
 _SEND_PASSIVE = "passive"
 _SEND_PROACTIVE = "proactive"
+_TRACE_STORE = TraceStore()
 
 
 def _as_str_set(values: Any) -> set[str]:
@@ -81,10 +94,119 @@ def _build_chain(event: AstrMessageEvent, content_mode: str) -> list[Any]:
     return copy.deepcopy(event.get_messages())
 
 
+def _sender_name(event: AstrMessageEvent) -> str:
+    try:
+        sender = event.message_obj.sender
+        name = getattr(sender, "nickname", None) or getattr(sender, "user_id", None)
+        if name:
+            return str(name).strip()
+    except Exception:
+        pass
+    return str(event.get_sender_id())
+
+
 class MsgDebuggerStar(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
         self.cfg = config
+        self._sync_store_limit()
+        context.register_web_api(
+            f"/{PLUGIN_NAME}/traces",
+            self.api_list_traces,
+            ["GET"],
+            "List pipeline traces",
+        )
+        context.register_web_api(
+            f"/{PLUGIN_NAME}/traces/clear",
+            self.api_clear_traces,
+            ["POST"],
+            "Clear pipeline traces",
+        )
+
+    def _trace_enabled(self) -> bool:
+        return bool(self.cfg.get("trace_enabled", True))
+
+    def _sync_store_limit(self) -> None:
+        try:
+            limit = int(self.cfg.get("max_trace_entries") or 200)
+        except (TypeError, ValueError):
+            limit = 200
+        _TRACE_STORE.set_max_traces(limit)
+
+    def _trace_meta(self, event: AstrMessageEvent) -> dict[str, str]:
+        chat = "私聊" if event.is_private_chat() else "群聊"
+        message_str = (event.message_str or "").strip()
+        return {
+            "at": "",
+            "umo": str(event.unified_msg_origin),
+            "chat": chat,
+            "sender_id": str(event.get_sender_id()),
+            "sender_name": _sender_name(event),
+            "group_id": str(event.get_group_id() or ""),
+            "summary": message_str[:120],
+        }
+
+    def _record_stage(
+        self,
+        event: AstrMessageEvent,
+        stage: str,
+        fields: list[dict[str, Any]],
+    ) -> None:
+        if not self._trace_enabled() or not fields:
+            return
+        trace_id = _TRACE_STORE.ensure_trace_id(event)
+        _TRACE_STORE.begin_trace(trace_id, self._trace_meta(event))
+        _TRACE_STORE.add_stage(trace_id, stage, fields)
+
+    async def api_list_traces(self):
+        return json_response({"traces": _TRACE_STORE.list_traces()})
+
+    async def api_clear_traces(self):
+        _TRACE_STORE.clear()
+        return json_response({"cleared": True})
+
+    @filter.event_message_type(filter.EventMessageType.ALL)
+    async def on_trace_inbound(self, event: AstrMessageEvent) -> None:
+        if not self._trace_enabled():
+            return
+        if str(event.get_sender_id()) == str(event.get_self_id()):
+            return
+        self._record_stage(event, "inbound", build_inbound_fields(event))
+
+    @filter.on_llm_request(priority=-100)
+    async def on_trace_llm_request(
+        self,
+        event: AstrMessageEvent,
+        req: ProviderRequest,
+    ) -> None:
+        if not self._trace_enabled():
+            return
+        self._record_stage(event, "llm_request", build_llm_request_fields(event, req))
+
+    @filter.on_llm_response()
+    async def on_trace_llm_response(self, event: AstrMessageEvent, resp: Any) -> None:
+        if not self._trace_enabled():
+            return
+        self._record_stage(event, "llm_response", build_llm_response_fields(resp))
+
+    @filter.on_decorating_result()
+    async def on_trace_decorating(self, event: AstrMessageEvent) -> None:
+        if not self._trace_enabled():
+            return
+        self._record_stage(event, "decorating", build_decorating_fields(event))
+
+    @filter.after_message_sent()
+    async def on_trace_sent(self, event: AstrMessageEvent) -> None:
+        if not self._trace_enabled():
+            return
+        echo_mode = None
+        if not _should_skip(event, self.cfg, self.context):
+            echo_mode = _send_mode(self.cfg)
+        self._record_stage(
+            event,
+            "sent",
+            build_sent_fields(event, echo_mode=echo_mode),
+        )
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_passive_echo(self, event: AstrMessageEvent):

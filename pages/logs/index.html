@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MsgDebugger 管线日志</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="toolbar">
+      <h1>管线日志</h1>
+      <div class="toolbar-actions">
+        <label class="inline">
+          <input type="checkbox" id="autoRefresh" checked />
+          自动刷新
+        </label>
+        <button type="button" id="btnRefresh">刷新</button>
+        <button type="button" id="btnClear" class="danger">清空</button>
+      </div>
+    </header>
+
+    <section class="panel filters">
+      <div class="filter-group">
+        <span class="filter-title">阶段</span>
+        <div id="stageToggles" class="toggle-row"></div>
+      </div>
+      <div class="filter-group">
+        <span class="filter-title">内容</span>
+        <div id="fieldToggles" class="toggle-row"></div>
+      </div>
+      <div class="filter-group">
+        <span class="filter-title">选项</span>
+        <label class="inline"><input type="checkbox" id="optDiff" /> 高亮与上一步差异</label>
+        <label class="inline"><input type="checkbox" id="optCollapse" checked /> 默认折叠长文本</label>
+        <input type="text" id="umoFilter" placeholder="过滤 umo / 发送者…" />
+      </div>
+    </section>
+
+    <main id="traceList" class="trace-list"></main>
+    <template id="traceTpl">
+      <article class="trace-card">
+        <header class="trace-head"></header>
+        <div class="trace-stages"></div>
+      </article>
+    </template>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
