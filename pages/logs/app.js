@@ -229,14 +229,23 @@ function saveUi() {
   }
   clearTimeout(saveUiTimer);
   saveUiTimer = setTimeout(() => {
-    persistUiState(payload).catch(() => {});
-  }, 400);
+    persistUiState(payload);
+  }, 200);
 }
 
 async function persistUiState(payload) {
-  await ensureBridgeReady();
-  if (!bridge?.apiPost) return;
-  await bridge.apiPost("page/ui-state", { ui: payload || serializeUiState() });
+  try {
+    await ensureBridgeReady();
+    if (!bridge?.apiPost) {
+      console.warn("MsgDebugger: bridge apiPost 不可用");
+      return false;
+    }
+    await bridge.apiPost("page/ui-state", { ui: payload || serializeUiState() });
+    return true;
+  } catch (err) {
+    console.error("MsgDebugger: 保存 UI 状态失败:", err);
+    return false;
+  }
 }
 
 function applyPreset(name) {
@@ -759,7 +768,7 @@ async function initPage() {
 
 window.addEventListener("pagehide", () => {
   clearTimeout(saveUiTimer);
-  persistUiState().catch(() => {});
+  void persistUiState();
 });
 
 window.addEventListener("focus", () => {
