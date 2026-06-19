@@ -202,7 +202,7 @@ function renderToggle(container, entries, group) {
   container.innerHTML = "";
   for (const [key, label] of entries) {
     const wrap = document.createElement("label");
-    wrap.className = "inline";
+    wrap.className = "ctrl inline";
     const input = document.createElement("input");
     input.type = "checkbox";
     input.dataset.key = key;
@@ -265,13 +265,16 @@ function bindEvents() {
   document.getElementById("autoRefresh")?.addEventListener("change", (e) => {
     ui.autoRefresh = e.target.checked;
     saveUi();
-    scheduleRefresh();
-    if (ui.autoRefresh) fetchTraces().catch(console.error);
+    if (ui.autoRefresh) restartRefresh();
+    else if (refreshTimer) {
+      clearInterval(refreshTimer);
+      refreshTimer = null;
+    }
   });
   document.getElementById("fastRefresh")?.addEventListener("change", (e) => {
     ui.fastRefresh = e.target.checked;
     saveUi();
-    scheduleRefresh();
+    if (ui.autoRefresh) scheduleRefresh();
   });
   document.getElementById("umoFilter")?.addEventListener("input", (e) => {
     ui.umoFilter = e.target.value.trim();
@@ -279,8 +282,7 @@ function bindEvents() {
     renderTraces(lastData);
   });
   document.getElementById("btnRefresh")?.addEventListener("click", () => {
-    lastSignature = "";
-    fetchTraces().catch(console.error);
+    fetchTraces({ force: true }).catch(console.error);
     fetchRuntime().catch(console.error);
   });
   document.getElementById("btnClear")?.addEventListener("click", clearTraces);
@@ -531,21 +533,48 @@ async function apiGet(path) {
   return res || {};
 }
 
-async function fetchTraces() {
+async function fetchTraces(options = {}) {
+  const { force = false } = options;
   const data = await apiGet("page/traces");
   const traces = data.traces || [];
   const sig = tracesSignature(traces);
-  if (sig === lastSignature) return;
+  if (!force && sig === lastSignature) return false;
   lastSignature = sig;
   lastData = traces;
   renderTraces(lastData);
+  return true;
+}
+
+async function poll() {
+  await fetchTraces();
+  await fetchRuntime();
+}
+
+function refreshIntervalMs() {
+  return ui.fastRefresh ? 1000 : 3000;
+}
+
+function scheduleRefresh() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+  if (!ui.autoRefresh) return;
+  refreshTimer = setInterval(() => {
+    poll().catch(console.error);
+  }, refreshIntervalMs());
+}
+
+function restartRefresh() {
+  scheduleRefresh();
+  poll().catch(console.error);
 }
 
 async function fetchRuntime() {
   try {
     const data = await apiGet("page/runtime");
     if (data && runtimeBadge) {
-      runtimeBadge.textContent = `复读 ${data.echo_active || "?"}`;
+      runtimeBadge.textContent = `复读：${data.echo_active || "?"}`;
     }
   } catch {
     /* ignore */
@@ -561,33 +590,17 @@ async function clearTraces() {
   renderTraces([]);
 }
 
-function refreshIntervalMs() {
-  return ui.fastRefresh ? 1000 : 3000;
-}
-
-function scheduleRefresh() {
-  if (refreshTimer) {
-    clearInterval(refreshTimer);
-    refreshTimer = null;
-  }
-  if (!ui.autoRefresh || document.visibilityState !== "visible") return;
-  refreshTimer = setInterval(() => {
-    if (document.visibilityState === "visible") {
-      fetchTraces().catch(console.error);
-      fetchRuntime().catch(console.error);
-    }
-  }, refreshIntervalMs());
-}
-
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
-    fetchTraces().catch(console.error);
-    fetchRuntime().catch(console.error);
-    scheduleRefresh();
+    restartRefresh();
   } else if (refreshTimer) {
     clearInterval(refreshTimer);
     refreshTimer = null;
   }
+});
+
+window.addEventListener("focus", () => {
+  if (ui.autoRefresh) restartRefresh();
 });
 
 async function initPage() {
@@ -598,9 +611,9 @@ async function initPage() {
   bindEvents();
   setupUiControls();
   await bridge.ready();
-  await fetchTraces();
+  await fetchTraces({ force: true });
   await fetchRuntime();
-  scheduleRefresh();
+  restartRefresh();
 }
 
 initPage().catch(console.error);

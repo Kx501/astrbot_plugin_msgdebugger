@@ -7,60 +7,64 @@
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <header class="toolbar">
-      <div class="toolbar-main">
-        <h1>管线日志</h1>
-        <div id="presetRow" class="preset-row">
-          <label class="preset-option">
-            <input type="radio" name="preset" value="compact" checked />
-            精简
-          </label>
-          <label class="preset-option">
-            <input type="radio" name="preset" value="injection" />
-            注入
-          </label>
-          <label class="preset-option">
-            <input type="radio" name="preset" value="full" />
-            完整
-          </label>
+    <div class="page-shell">
+      <section class="chrome">
+        <div class="chrome-row">
+          <div class="chrome-main">
+            <h1 class="page-title">管线日志</h1>
+            <div id="presetRow" class="preset-row">
+              <label class="preset-option">
+                <input type="radio" name="preset" value="compact" checked />
+                <span>精简</span>
+              </label>
+              <label class="preset-option">
+                <input type="radio" name="preset" value="injection" />
+                <span>注入</span>
+              </label>
+              <label class="preset-option">
+                <input type="radio" name="preset" value="full" />
+                <span>完整</span>
+              </label>
+            </div>
+            <span id="runtimeBadge" class="badge runtime-badge"></span>
+          </div>
+          <div class="chrome-actions">
+            <label class="ctrl inline">
+              <input type="checkbox" id="autoRefresh" checked />
+              自动刷新
+            </label>
+            <label class="ctrl inline">
+              <input type="checkbox" id="fastRefresh" />
+              1s
+            </label>
+            <button type="button" id="btnRefresh" class="btn">刷新</button>
+            <button type="button" id="btnClear" class="btn danger">清空</button>
+          </div>
         </div>
-        <span id="runtimeBadge" class="runtime-badge"></span>
-      </div>
-      <div class="toolbar-actions">
-        <label class="inline">
-          <input type="checkbox" id="autoRefresh" checked />
-          自动刷新
-        </label>
-        <label class="inline">
-          <input type="checkbox" id="fastRefresh" />
-          1s
-        </label>
-        <button type="button" id="btnRefresh">刷新</button>
-        <button type="button" id="btnClear" class="danger">清空</button>
-      </div>
-    </header>
 
-    <details id="filterDetails" class="panel filters-panel">
-      <summary class="filters-summary">筛选</summary>
-      <div class="filter-group">
-        <div class="filter-title">阶段</div>
-        <div id="stageToggles" class="toggle-row"></div>
-      </div>
-      <div class="filter-group">
-        <div class="filter-title">字段</div>
-        <div id="fieldToggles" class="toggle-row"></div>
-      </div>
-      <div class="filter-group">
-        <div class="filter-title">选项</div>
-        <div class="filter-options">
-          <label class="inline"><input type="checkbox" id="optDiff" /> 高亮差异</label>
-          <label class="inline"><input type="checkbox" id="optCollapse" checked /> 折叠长文本</label>
-          <input type="text" id="umoFilter" placeholder="过滤 umo / 发送者…" />
-        </div>
-      </div>
-    </details>
+        <details id="filterDetails" class="filters-panel">
+          <summary class="filters-summary">筛选</summary>
+          <div class="filter-group">
+            <div class="filter-title">阶段</div>
+            <div id="stageToggles" class="toggle-row"></div>
+          </div>
+          <div class="filter-group">
+            <div class="filter-title">字段</div>
+            <div id="fieldToggles" class="toggle-row"></div>
+          </div>
+          <div class="filter-group">
+            <div class="filter-title">选项</div>
+            <div class="filter-options">
+              <label class="ctrl inline"><input type="checkbox" id="optDiff" /> 高亮差异</label>
+              <label class="ctrl inline"><input type="checkbox" id="optCollapse" checked /> 折叠长文本</label>
+              <input type="text" id="umoFilter" class="text-input" placeholder="过滤 umo / 发送者…" />
+            </div>
+          </div>
+        </details>
+      </section>
 
-    <main id="traceList" class="trace-list"></main>
+      <main id="traceList" class="trace-list"></main>
+    </div>
     <template id="traceTpl">
       <article class="trace-card collapsed" data-trace-id="">
         <header class="trace-head">

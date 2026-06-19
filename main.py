@@ -97,6 +97,10 @@ def _echo_runtime_enabled(cfg: AstrBotConfig) -> bool:
     return RUNTIME.echo_enabled(bool(cfg.get("echo_enabled", True)))
 
 
+def _echo_reply(cfg: AstrBotConfig) -> str:
+    return f"复读：{'开' if _echo_runtime_enabled(cfg) else '关'}"
+
+
 def _trace_enabled(cfg: AstrBotConfig) -> bool:
     return bool(cfg.get("trace_enabled", True))
 
@@ -225,9 +229,7 @@ class MsgDebuggerStar(Star):
             return
 
         if not action or action == "status":
-            status = RUNTIME.echo_status(bool(self.cfg.get("echo_enabled", True)))
-            active = "开" if _echo_runtime_enabled(self.cfg) else "关"
-            yield event.plain_result(f"复读：{status}（当前 {active}）")
+            yield event.plain_result(_echo_reply(self.cfg))
             return
 
         value = _apply_toggle(action)
@@ -236,9 +238,7 @@ class MsgDebuggerStar(Star):
             return
 
         RUNTIME.set_echo(value)
-        active = "开" if _echo_runtime_enabled(self.cfg) else "关"
-        label = RUNTIME.echo_status(bool(self.cfg.get("echo_enabled", True)))
-        yield event.plain_result(f"复读已设为 {label}（当前 {active}）")
+        yield event.plain_result(_echo_reply(self.cfg))
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_trace_inbound(self, event: AstrMessageEvent) -> None:
