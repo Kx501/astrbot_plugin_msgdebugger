@@ -115,6 +115,7 @@ def pick_event_extras(event: Any) -> dict[str, Any]:
         return {}
     out: dict[str, Any] = {}
     for key in (
+        "_md_injection",
         "_ii_injected",
         "_mp_pending_batches",
         "_md_trace_id",

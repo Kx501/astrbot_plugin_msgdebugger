@@ -27,6 +27,8 @@ _log = logging.getLogger(__name__)
 
 TRACE_EXTRA_KEY = "_md_trace_id"
 LLM_BEFORE_EXTRA = "_md_llm_before"
+INJECTION_EXTRA_KEY = "_md_injection"
+LEGACY_INJECTION_EXTRA_KEY = "_ii_injected"
 
 
 class TraceStore:
@@ -209,8 +211,18 @@ def build_llm_request_fields(event: Any, req: Any) -> list[dict[str, Any]]:
     return fields
 
 
+def _read_injection_extra(get_extra: Any) -> dict[str, Any] | None:
+    if not callable(get_extra):
+        return None
+    for key in (INJECTION_EXTRA_KEY, LEGACY_INJECTION_EXTRA_KEY):
+        raw = get_extra(key)
+        if isinstance(raw, dict):
+            return raw
+    return None
+
+
 def build_injection_fields(event: Any, req: Any) -> list[dict[str, Any]]:
-    """对比注入前后，展示 InfoInjection 等插件写入的内容。"""
+    """对比注入前后，展示符合 MsgDebugger Injection Trace 约定的结构化注入。"""
     get_extra = getattr(event, "get_extra", None)
     before: dict[str, Any] = {}
     if callable(get_extra):
@@ -225,12 +237,13 @@ def build_injection_fields(event: Any, req: Any) -> list[dict[str, Any]]:
 
     fields: list[dict[str, Any]] = []
 
-    ii = None
-    if callable(get_extra):
-        ii = get_extra("_ii_injected")
+    injection = _read_injection_extra(get_extra)
 
-    if isinstance(ii, dict) and ii.get("blocks"):
-        rule_ids = ii.get("rule_ids") or []
+    if isinstance(injection, dict) and injection.get("blocks"):
+        source = injection.get("source")
+        if source:
+            fields.append(_field("injection_source", "来源", "text", str(source)))
+        rule_ids = injection.get("rule_ids") or []
         fields.append(
             _field(
                 "injection_rules",
@@ -240,7 +253,7 @@ def build_injection_fields(event: Any, req: Any) -> list[dict[str, Any]]:
             )
         )
         block_lines: list[str] = []
-        for block in ii.get("blocks") or []:
+        for block in injection.get("blocks") or []:
             if not isinstance(block, dict):
                 continue
             rid = block.get("rule_id", "?")
@@ -254,7 +267,7 @@ def build_injection_fields(event: Any, req: Any) -> list[dict[str, Any]]:
             fields.append(
                 _field("injection_blocks", "注入内容", "lines", block_lines),
             )
-        date = ii.get("date")
+        date = injection.get("date")
         if date:
             fields.append(_field("injection_date", "注入日", "text", str(date)))
     else:
@@ -263,7 +276,7 @@ def build_injection_fields(event: Any, req: Any) -> list[dict[str, Any]]:
                 "injection_status",
                 "注入状态",
                 "text",
-                "本轮无 InfoInjection 记录（可能未注入或插件未启用）",
+                "本轮无结构化注入记录（可能未注入或未写入 _md_injection）",
             )
         )
 
