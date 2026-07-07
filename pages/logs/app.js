@@ -468,6 +468,15 @@ function stagePlainText(stage) {
   return chunks.join("\n").trim();
 }
 
+function fieldContentLong(field, wrap) {
+  const text = wrap.textContent || "";
+  if (text.length > 200) return true;
+  if (text.split("\n").length > 3) return true;
+  if ((field.lines || []).length > 3) return true;
+  if ((field.system?.segments || []).length > 2) return true;
+  return false;
+}
+
 function renderFieldBody(field, diff, fieldKey) {
   const expanded = fieldExpanded.has(fieldKey);
   const wrap = document.createElement("div");
@@ -512,10 +521,7 @@ function renderFieldBody(field, diff, fieldKey) {
     wrap.textContent = field.text || "(空)";
   }
 
-  const long =
-    (wrap.textContent || "").length > 200 ||
-    (field.lines || []).length > 3 ||
-    (field.system?.segments || []).length > 2;
+  const long = fieldContentLong(field, wrap);
   if (long && ui.optCollapse) {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -624,7 +630,7 @@ function renderTraces(traces, scrollHint = "filter") {
           ui.optDiff &&
           stageDiff &&
           ["completion", "plain", "chain", "prompt"].includes(field.key);
-        const fieldKey = `${trace.id}:${field.key}`;
+        const fieldKey = `${trace.id}:${stage.key}:${field.key}`;
         const { wrap, extra } = renderFieldBody(field, fieldDiff, fieldKey);
         fieldEl.append(wrap);
         if (extra) fieldEl.append(extra);
