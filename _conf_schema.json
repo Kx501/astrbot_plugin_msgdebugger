@@ -1,60 +1,11 @@
 {
-  "echo_enabled": {
-    "description": "复读探针",
-    "type": "bool",
-    "default": true,
-    "hint": "关闭后不再复读；可用 /md echo on|off 临时覆盖（重载插件后恢复）。"
-  },
-  "send_mode": {
-    "description": "发送方式",
-    "type": "string",
-    "default": "passive",
-    "options": ["passive", "proactive"],
-    "labels": ["被动回复", "主动推送"],
-    "hint": "被动：yield 回复，走 on_decorating_result 等出站钩子。主动：context.send_message，走出站补丁路径。"
-  },
-  "echo_content": {
-    "description": "复读内容",
-    "type": "string",
-    "default": "plain",
-    "options": ["plain", "chain"],
-    "labels": ["纯文本", "完整消息链"],
-    "hint": "纯文本仅复读 message_str；完整消息链保留图片、At 等段。"
-  },
-  "group_whitelist": {
-    "description": "群白名单",
-    "type": "list",
-    "default": [],
-    "hint": "留空不限制；填写后仅在对应群内复读。私聊不受此项限制。"
-  },
-  "user_whitelist": {
-    "description": "用户白名单",
-    "type": "list",
-    "default": [],
-    "hint": "留空不限制；填写后仅复读对应用户的消息。"
-  },
-  "trace_enabled": {
-    "description": "管线日志",
-    "type": "bool",
-    "default": true,
-    "hint": "记录入站、LLM 请求/响应、出站装饰、已发送等阶段，在插件 Page「logs」中查看。"
-  },
-  "persist_traces": {
-    "description": "持久化日志",
-    "type": "bool",
-    "default": true,
-    "hint": "将完整 trace 写入 plugin_data/astrbot_plugin_msgdebugger/traces.jsonl，重载插件后仍可查看。"
-  },
-  "max_persist_entries": {
-    "description": "持久化条数上限",
-    "type": "int",
-    "default": 500,
-    "hint": "开启持久化时的最大保留条数；同时作为内存中可浏览条数上限。"
-  },
-  "max_trace_entries": {
-    "description": "内存条数上限",
-    "type": "int",
-    "default": 200,
-    "hint": "关闭 persist_traces 时，内存环形缓冲条数。"
-  }
+  "echo_enabled": {"description":"默认启用复读","type":"bool","default":false,"hint":"独立于调试采集。可在 Pages 或 /md echo on|off|status|reset 临时覆盖。"},
+  "send_mode": {"description":"复读发送方式","type":"string","default":"passive","options":["passive","proactive"],"labels":["被动回复","主动发送"],"hint":"被动：进入 AstrBot 回复处理流程。主动：直接调用发送接口，不依赖其他插件。"},
+  "echo_content": {"description":"复读内容","type":"string","default":"plain","options":["plain","chain"],"labels":["纯文本","完整消息链"]},
+  "group_whitelist": {"description":"复读群白名单","type":"list","default":[],"hint":"留空不限群；私聊不受此项限制。仅限制复读，不限制调试采集。"},
+  "user_whitelist": {"description":"复读用户白名单","type":"list","default":[],"hint":"留空不限用户。仅限制复读，不限制调试采集。"},
+  "trace_enabled": {"description":"启用透明调试采集","type":"bool","default":true,"hint":"采集插件执行边界、内置 Agent 请求、工具调用及回复。修改后重载插件。"},
+  "persist_traces": {"description":"保存调试记录","type":"bool","default":true,"hint":"写入插件数据目录的 traces.sqlite3。提示词和消息正文可能含隐私；页面可清空当前记录。"},
+  "max_persist_entries": {"description":"持久化记录数上限","type":"int","default":200,"hint":"10–1000。记录内容总量另有约 64 MiB 上限。"},
+  "max_trace_entries": {"description":"内存记录数上限","type":"int","default":200,"hint":"关闭持久化时生效，10–1000。"}
 }

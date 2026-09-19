@@ -1,91 +1,31 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MsgDebugger 管线日志</title>
-    <link rel="stylesheet" href="./style.css" />
-  </head>
-  <body>
-    <div class="page-shell">
-      <section class="chrome">
-        <div class="chrome-row">
-          <div class="chrome-main">
-            <h1 class="page-title">管线日志</h1>
-            <div id="presetRow" class="preset-row">
-              <label class="preset-option">
-                <input type="radio" name="preset" value="compact" checked />
-                <span>精简</span>
-              </label>
-              <label class="preset-option">
-                <input type="radio" name="preset" value="injection" />
-                <span>注入</span>
-              </label>
-              <label class="preset-option">
-                <input type="radio" name="preset" value="full" />
-                <span>完整</span>
-              </label>
-            </div>
-            <span id="runtimeBadge" class="badge runtime-badge"></span>
-          </div>
-          <div class="chrome-actions">
-            <label class="ctrl inline">
-              <input type="checkbox" id="autoRefresh" checked />
-              自动刷新
-            </label>
-            <label class="ctrl inline">
-              <input type="checkbox" id="fastRefresh" />
-              1s
-            </label>
-            <label class="ctrl inline">
-              <input type="checkbox" id="autoScroll" checked />
-              自动滚动
-            </label>
-            <button type="button" id="btnRefresh" class="btn">刷新</button>
-            <button type="button" id="btnClear" class="btn danger">清空</button>
-          </div>
-        </div>
-
-        <details id="filterDetails" class="filters-panel">
-          <summary class="filters-summary">筛选</summary>
-          <div class="filter-group">
-            <div class="filter-title">阶段</div>
-            <div id="stageToggles" class="toggle-row"></div>
-          </div>
-          <div class="filter-group">
-            <div class="filter-title">字段</div>
-            <div id="fieldToggles" class="toggle-row"></div>
-          </div>
-          <div class="filter-group">
-            <div class="filter-title">选项</div>
-            <div class="filter-options">
-              <label class="ctrl inline"><input type="checkbox" id="optDiff" /> 高亮差异</label>
-              <label class="ctrl inline"><input type="checkbox" id="optCollapse" checked /> 折叠长文本</label>
-              <input type="text" id="umoFilter" class="text-input" placeholder="过滤 umo / 发送者…" />
-            </div>
-          </div>
-        </details>
-      </section>
-
-      <main id="traceList" class="trace-list"></main>
-    </div>
-    <template id="traceTpl">
-      <article class="trace-card collapsed" data-trace-id="">
-        <header class="trace-head">
-          <span class="time"></span>
-          <span class="badge chat"></span>
-          <span class="badge sender"></span>
-          <span class="summary"></span>
-          <span class="expand-hint">▸</span>
-        </header>
-        <div class="trace-body">
-          <nav class="stage-tabs"></nav>
-          <div class="stage-panels"></div>
-        </div>
-      </article>
-    </template>
-
-    <script src="/api/plugin/page/bridge-sdk.js"></script>
-    <script type="module" src="./app.js"></script>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MsgDebugger · 透明调试台</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header>
+    <div><span class="eyebrow">ASTRBOT / MSGDEBUGGER</span><h1>透明调试台</h1></div>
+    <div class="actions"><label><input id="auto" type="checkbox" checked /> 自动更新列表</label><button id="refresh">刷新</button></div>
+  </header>
+  <div id="notice" role="status" aria-live="polite"></div>
+  <div class="workspace">
+    <aside>
+      <h2>对话记录</h2>
+      <input id="search" type="search" placeholder="搜索群、私聊对象或内容" aria-label="搜索对话" />
+      <p class="muted">按群 / 私聊分组 · 最近 200 条</p>
+      <div id="traces"></div>
+    </aside>
+    <main>
+      <div id="selection"></div>
+      <nav id="tabs" aria-label="调试栏目"></nav>
+      <section id="content" aria-live="polite"></section>
+    </main>
+  </div>
+  <script src="/api/plugin/page/bridge-sdk.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
 </html>

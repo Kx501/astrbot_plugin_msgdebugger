@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-"""运行时开关（覆盖配置，重载插件后重置）。"""
+"""Temporary echo overrides that reset when the plugin is unloaded."""
 
 from __future__ import annotations
 

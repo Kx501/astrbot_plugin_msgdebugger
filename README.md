@@ -1,157 +1,104 @@
-# MsgDebugger
+# MsgDebugger · 透明调试台
 
-用于调试 AstrBot 主被动消息是否被其他插件有效处理，并提供**格式化管线日志**页面。
+面向没有读过 AstrBot 源码的开发者。以一条对话为入口，查看模型输入、插件改动、工具、Skills、请求差异和用量；复读探针独立保留，不要求安装其他插件。
+
+## 开始使用
+
+1. 安装并启用插件，重载一次。
+2. 打开 AstrBot WebUI → 插件 → MsgDebugger → Pages → **logs**。
+3. 发送一条消息，在左侧按群聊或私聊对象展开并选中记录。先读“过程总览”，再沿顶部流程进入具体请求。
+4. “模型输入”默认定位最后一条 user，消息目录每页 8 条。50 条输入可以只属于一次模型请求；角色、排列顺序和工具循环可在页内的一分钟教程里学习。
+5. 用顶部标签切换“过程总览、模型输入、插件改动、工具、Skills、请求对比、Token 与耗时、复读与采集”。
+
+自动刷新仅更新左侧列表；点击“更新这条记录”获取新的详情，阅读展开内容时不会跳动。列表显示最近 200 条，可按文本、群、用户、会话搜索。每个对象的记录单独分页，不同平台实例不会合并；缺少归属字段的旧记录保留原会话。完整的新手路径和界面截图见 [中文导航说明](docs/zh/README.md)。
+
+## 先理解三件事
+
+- **已注册、本次提供、实际调用是不同状态。** 工具标签分别显示当前目录、历史请求工具定义、执行记录。
+- **Skill 已安装不等于全文已被模型读取。** 页面显示当前文件和请求中名称 / 路径的文本匹配证据，不把文本匹配当作读取证明。
+- **采集快照不等于最终 HTTP 请求。** 内置 Agent 记录点位于 Provider 转换之前；模型能力过滤、服务商格式转换、Provider 内部重试仍可能发生。
 
 ## 功能
 
-1. **复读探针**：被动 `yield` 或主动 `send_message`，验证 MsgProcessor 等出站插件。
-2. **管线日志**：记录入站 → LLM 请求 → 消息注入 → LLM 响应 → 出站装饰 → 已发送。
-3. **抓包式持久化**：完整 trace 落盘，重载插件后仍可查看。
-4. **运行时指令**：`/md echo on|off|status|reset` 临时控制复读（重载后恢复配置默认）。
+- 过程总览：入站、插件处理、模型每次尝试、工具执行、最终响应、回复装饰和发送通知。
+- 模型输入：按消息顺序展示 system / developer / user / assistant / tool，以及工具参数定义和额外内容。
+- 插件改动：显示来源插件、处理函数、事件类型、执行耗时、采集字段前后快照。默认仅显示改动和异常。
+- 请求对比：默认定位同一会话的上一条记录，可手动选择两条记录及其中的模型请求。支持基础指令 / 工具和全部内容两种范围。
+- Token：按请求展示服务商回报的输入、输出、缓存输入；只对已回报部分求和。分块的“字符数 ÷ 4”仅是粗估，不是分词计数或账单。
+- 导出：预览 JSON 后下载，隐藏记录头部身份字段及部分常见密钥形式。正文仍需人工检查。
 
-## 指令
+## 复读
 
-| 指令 | 说明 |
-|------|------|
-| `/md echo on\|off\|status\|reset` | 控制复读探针 |
+新安装默认关闭复读，升级保留原有配置值。可以在“复读与采集”标签临时开关，也可以由管理员发送：
 
-`reset` 恢复为 WebUI 配置默认值。
+```text
+/md echo on
+/md echo off
+/md echo status
+/md echo reset
+```
 
-## 查看日志
+`reset` 恢复插件配置。重载也会清除临时覆盖。配置中可选被动回复 / 主动发送、纯文本 / 完整消息链，以及群和用户白名单。白名单只限制复读，不限制采集。主动发送直接调用 AstrBot，不依赖 MsgProcessor 或其他插件。
 
-1. 启用插件，确保 `trace_enabled` / `persist_traces` 为真（默认开启）。
-2. **重载插件**（首次添加或修改 `pages/logs/` 后必须重载）。
-3. 打开 AstrBot WebUI → 插件 → MsgDebugger → Page **`logs`**。
-4. 发消息或触发 LLM 对话；默认 **精简** 视图，可切换 **注入** / **完整**。
+## 归因与覆盖边界
 
-页内特性：
+插件归因通过可恢复的运行时适配器包装 AstrBot 注册的消息事件处理函数。记录每次协程执行或生成器恢复前后的状态，避免把 `yield` 之后的下游处理归到前一个插件。保留原返回值和异常，卸载时只恢复仍由本实例持有的包装。
 
-- **视图预设**：精简 / 注入 / 完整（顶栏单选）
-- **筛选**：点击「筛选」展开阶段/字段/选项（原生 `<details>`）
-- **Trace 卡片**：点击标题展开，阶段用 Tab 切换
-- **自动刷新**：默认 3s；可勾选 1s；切走 tab 暂停，回来立即拉取
+“执行边界观测”证明变化发生在这个函数执行区间。嵌套调用、插件自行创建任务、共享事件被并发修改时，不能证明某一行代码是唯一来源。采集字段包含消息文本/消息链、回复、请求指令/历史/工具、可识别的 Agent 消息和字典参数；不跟踪任意对象全部属性。
 
-## 记录内容
+内部 Agent runner 适配器记录每次已观测的模型调用尝试，使用独立 attempt ID 关联响应，支持并发对话。第三方 Agent、插件直接调用网络或绕过 runner 的请求、Provider 内部重试不保证覆盖。工具起止钩子没有稳定调用 ID 时，按事件顺序展示，不把同名并发调用强行配对。
 
-| 阶段 | 主要内容 |
-|------|----------|
-| 入站 | 原始文本、消息链 |
-| LLM 请求 | 注入后的 `prompt` / `system` / `extra` |
-| 消息注入 | 命中规则、注入块、Prompt/System 增量（不重复 LLM 阶段全文） |
-| LLM 响应 | 回复、token、工具调用 |
-| 出站装饰 | 出站链、纯文本预览 |
-| 已发送 | 发送状态、复读模式 |
+适配器依赖 AstrBot 内部接口，接口不可用时独立降级，页面显示未覆盖。`astrbot_version` 表示最低安装要求，不代表所有版本上的内部采集适配器均已验证。模型内部未返回的思考内容无法采集。
 
-`on_llm_request` 在 priority `100` 快照注入前，`-100` 记录注入后结果。
+## 存储和限制
 
-## 插件集成：Injection Trace 约定
+插件数据目录：`traces.sqlite3`。使用 Python 标准库 SQLite，无新增 Python / 前端依赖。
 
-MsgDebugger 对「谁在 LLM 请求里注入了什么」提供两层观测，**不要求**接入方依赖 MsgDebugger 包或 import 其代码。
+- 默认保留 200 条，数量可配置为 10–1000。
+- 单阶段 256 KiB、单记录 2 MiB / 300 阶段；内存与持久化内容各约 64 MiB 上限。
+- 字符串最多 64000 字符、集合最多 500 项、嵌套最多 16 层；内嵌 base64 媒体省略。
+- 截断处有标记；因此历史对比、统计可能不完整。SQLite 文件因空闲页可能大于内容上限。
+- 存储失败降级为内存，并在页面显示错误。
+- 首次创建数据库时导入旧 `traces.jsonl`，保留原文件。页面清空不会删除这个旧备份；如需彻底清理旧隐私记录，另行删除旧文件。
 
-### 观测层级
+日志会包含聊天正文、提示词和工具结果。已知密钥字段会被隐藏，但不保证任意正文都自动脱敏。页面通过 AstrBot 自带 Pages 桥接访问，不另开公开服务。
 
-| 层级 | 机制 | 接入成本 |
-|------|------|----------|
-| **L0 通用 diff** | MsgDebugger 在 `on_llm_request` 前后对比 `ProviderRequest` | **零适配**：任意修改 `prompt` / `system_prompt` / `extra_user_content_parts` 的插件自动可见 |
-| **L1 结构化报告** | 注入完成后 `event.set_extra(key, payload)` | 可选：在 logs 页展示规则 ID、注入块全文、位置等 |
+## 可选插件接入
 
-L0 由 MsgDebugger 在 priority `100`（注入前快照）与 `-100`（注入后记录）完成，**接入方无需写任何 extra**。
-
-L1 用于需要可读「命中了哪些规则、每块注入了什么」的场景；下文为 **MsgDebugger 对外约定的 payload 结构**（与具体业务插件解耦）。
-
-### L1：结构化 extra
-
-**推荐键名**：`_md_injection`
-
-**遗留别名**：`_ii_injected`（同 schema；MsgDebugger 仍会读取，供旧版接入方兼容）
-
-命名空间约定：`_md_` 前缀留给 MsgDebugger 生态；`_md_trace_id`、`_md_llm_before` 等为 MsgDebugger **内部自用**，第三方插件请勿写入。
-
-#### Payload 结构
-
-根对象：
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `source` | string | 否 | 报告来源，如插件名 `astrbot_plugin_xxx`，便于多插件并存时区分 |
-| `date` | string | 否 | 业务日期标记（如每日注入的 `YYYY-MM-DD`） |
-| `session_key` | string | 否 | 会话标识（可选，用于调试） |
-| `rule_ids` | string[] | 否 | 本轮命中的规则 ID 列表（展示为「命中规则」） |
-| `blocks` | object[] | **是**（L1 生效条件） | 注入块列表；**非空**时 logs 页展示结构化注入，否则仅显示「无结构化注入记录」 |
-
-`blocks[]` 每项：
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `rule_id` | string | 推荐 | 规则或块标识 |
-| `position` | string | 推荐 | 注入位置，如 `system`、`message_start`、`message_end`、`extra` 等 |
-| `ephemeral` | bool | 否 | `true` 表示仅本轮生效（UI 标为 temp） |
-| `priority` | number | 否 | 排序/优先级（仅记录，不影响 MsgDebugger） |
-| `text` | string | 推荐 | 注入全文；logs 页「注入块」直接展示 |
-| `text_len` | number | 否 | 无 `text` 时可用长度占位，UI 显示 `(仅记录长度 N)` |
-
-#### 写入时机
-
-在 `on_llm_request` 钩子内，**完成对 `ProviderRequest` 的修改之后**调用 `event.set_extra(...)`。
-
-MsgDebugger 在 priority `-100` 采集注入阶段，因此使用默认 priority 的 `on_llm_request` 钩子均在采集之前执行，无需为 MsgDebugger 单独调高/调低优先级。
-
-#### 示例
+不需要依赖或导入 MsgDebugger。其他插件可以在 `on_llm_request` 中写入追加式报告，版本 1 示例：
 
 ```python
-_INJECTION_EXTRA = "_md_injection"
-
-@filter.on_llm_request()
-async def on_llm_request(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
-    # ... 修改 req.prompt / system_prompt / extra_user_content_parts ...
-
-    if not applied_blocks:
-        return
-
-    event.set_extra(
-        _INJECTION_EXTRA,
-        {
-            "source": "astrbot_plugin_your_name",
-            "rule_ids": [b.rule_id for b in applied_blocks],
-            "blocks": [
-                {
-                    "rule_id": b.rule_id,
-                    "position": b.position,
-                    "ephemeral": b.ephemeral,
-                    "text": b.text,
-                }
-                for b in applied_blocks
-            ],
-        },
-    )
+reports = list(event.get_extra("_msgdebugger_events", []))
+reports.append(
+    {
+        "version": 1,
+        "source": "your_plugin_name",
+        "kind": "prompt_injection",
+        "summary": "Added project instructions",
+        "data": {"position": "system", "text": "..."},
+    }
+)
+event.set_extra("_msgdebugger_events", reports)
 ```
 
-#### L0 自动展示的 diff 字段
+报告跟随该事件关联到对话。Debugger 在自己的请求快照钩子（priority -10000）消费最多 100 条报告并清空队列，因此报告应在这个钩子之前写入；之后写入的报告不保证本轮采集。报告来源标为“插件自行报告”，不等同于独立验证的归因。未知业务字段作为数据展示，不参与执行。
 
-未提供 L1 或 `blocks` 为空时，若 `ProviderRequest` 仍被改动，注入阶段仍可能包含：
+## 从 1.x 升级
 
-- `prompt_before` — Prompt 注入前快照
-- `system_added` / `system_diff` — System 追加或变更
-- `extra_added` — Extra 块新增内容
+页面入口仍是 **logs**，原“精简 / 注入 / 完整”预设改为八个任务标签；注入详情迁移到“插件改动 / 请求对比”，原复读命令保留并限制管理员使用。旧 JSONL 作为历史数据导入，缺少逐轮快照的记录不能补算工具、对比和用量。旧 `_md_injection` / `_ii_injected` 专用约定不再采集，新接入请使用上述统一报告接口。
 
-#### 注意
+[English guide](docs/en/README.md) · [中文导航说明](docs/zh/README.md) · [2.0.0 变更记录](CHANGELOG.md)
 
-- `text` 会进入内存 trace 与 `traces.jsonl` 持久化，请勿写入密钥等敏感信息。
-- 多插件同时注入时，各自可写独立 extra；合并展示策略后续版本可能扩展，当前以**单次 set_extra 覆盖**为准（后写覆盖先写）。
-- 本约定仅描述 **logs 页可读性**；不改变 AstrBot 注入行为本身。
+## 开发检查
 
-## 配置
-
-见 `_conf_schema.json`：
-
-- `echo_enabled` / `send_mode` / `echo_content` / 白名单
-- `trace_enabled` / `persist_traces` / `max_persist_entries` / `max_trace_entries`
-
-## 开发
-
-```bash
-cd msgdebugger
-python -c "from core.trace_store import TraceStore; print('ok')"
+```text
+python -m unittest discover -s tests -v
+ruff format .
+ruff check .
+node --check pages/logs/app.js
+node --check pages/logs/ui.js
+node --check pages/logs/conversation.js
+node --experimental-vm-modules tests/page_smoke.mjs
 ```
 
-新增或修改 `pages/logs/` 后需**重载插件**。
+测试使用最小替身验证采集契约，无需安装完整 AstrBot。真实平台、服务商、Pages 布局和插件热重载仍需在运行中的 AstrBot 环境验收。

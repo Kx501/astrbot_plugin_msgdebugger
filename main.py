@@ -1,347 +1,245 @@
-# -*- coding: utf-8 -*-
-"""复读用户消息，并记录管线各阶段格式化日志。"""
+"""AstrBot transparent debugger and independent echo probe."""
 
 from __future__ import annotations
 
 import copy
-import re
-from pathlib import Path
-from typing import Any
 
-import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
-from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, StarTools
 
+from .core.observer import DebugObserver, snapshot, tool_info
 from .core.page_api import register_trace_page_routes
 from .core.runtime import RUNTIME
-from .core.trace_store import (
-    LLM_BEFORE_EXTRA,
-    TraceStore,
-    build_decorating_fields,
-    build_inbound_fields,
-    build_injection_fields,
-    build_llm_before_snapshot,
-    build_llm_request_fields,
-    build_llm_response_fields,
-    build_sent_fields,
-)
+from .core.trace_store import TraceStore
 
 PLUGIN_NAME = "astrbot_plugin_msgdebugger"
-_SEND_PASSIVE = "passive"
-_SEND_PROACTIVE = "proactive"
-_TRACE_STORE = TraceStore()
-
-
-def _as_str_set(values: Any) -> set[str]:
-    if not isinstance(values, list):
-        return set()
-    return {str(item).strip() for item in values if str(item).strip()}
-
-
-def _passes_whitelist(event: AstrMessageEvent, group_wl: set[str], user_wl: set[str]) -> bool:
-    sender_id = str(event.get_sender_id())
-    if user_wl and sender_id not in user_wl:
-        return False
-    if event.is_private_chat():
-        return True
-    if not group_wl:
-        return True
-    group_id = str(event.get_group_id() or "").strip()
-    return group_id in group_wl
-
-
-def _wake_prefixes(context: Context, event: AstrMessageEvent) -> list[str]:
-    cfg = context.get_config(umo=event.unified_msg_origin)
-    raw = cfg.get("wake_prefix") or ["/"]
-    if isinstance(raw, str):
-        return [raw]
-    if isinstance(raw, list):
-        return [str(p) for p in raw if str(p)]
-    return ["/"]
-
-
-def _is_wake_command(event: AstrMessageEvent, context: Context) -> bool:
-    msg_obj = event.message_obj
-    raw = ((msg_obj.message_str if msg_obj else None) or "").strip()
-    if not raw:
-        return False
-    for prefix in _wake_prefixes(context, event):
-        if raw.startswith(prefix):
-            return True
-    return False
-
-
-def _should_skip(event: AstrMessageEvent, cfg: AstrBotConfig, context: Context) -> bool:
-    if str(event.get_sender_id()) == str(event.get_self_id()):
-        return True
-    if _is_wake_command(event, context):
-        return True
-    group_wl = _as_str_set(cfg.get("group_whitelist"))
-    user_wl = _as_str_set(cfg.get("user_whitelist"))
-    return not _passes_whitelist(event, group_wl, user_wl)
-
-
-def _send_mode(cfg: AstrBotConfig) -> str:
-    mode = str(cfg.get("send_mode") or _SEND_PASSIVE).strip().lower()
-    return mode if mode in {_SEND_PASSIVE, _SEND_PROACTIVE} else _SEND_PASSIVE
-
-
-def _echo_content(cfg: AstrBotConfig) -> str:
-    content = str(cfg.get("echo_content") or "plain").strip().lower()
-    return content if content in {"plain", "chain"} else "plain"
-
-
-def _echo_runtime_enabled(cfg: AstrBotConfig) -> bool:
-    return RUNTIME.echo_enabled(bool(cfg.get("echo_enabled", True)))
-
-
-def _echo_reply(cfg: AstrBotConfig) -> str:
-    return f"复读：{'开' if _echo_runtime_enabled(cfg) else '关'}"
-
-
-def _trace_enabled(cfg: AstrBotConfig) -> bool:
-    return bool(cfg.get("trace_enabled", True))
-
-
-def _build_chain(event: AstrMessageEvent, content_mode: str) -> list[Any]:
-    if content_mode == "plain":
-        text = event.message_str or ""
-        return [Comp.Plain(text)] if text else []
-    return copy.deepcopy(event.get_messages())
-
-
-def _sender_name(event: AstrMessageEvent) -> str:
-    try:
-        sender = event.message_obj.sender
-        name = getattr(sender, "nickname", None) or getattr(sender, "user_id", None)
-        if name:
-            return str(name).strip()
-    except Exception:
-        pass
-    return str(event.get_sender_id())
-
-
-def _md_command_tail(event: AstrMessageEvent, context: Context) -> str:
-    text = re.sub(r"\s+", " ", (event.get_message_str() or event.message_str or "").strip())
-    for prefix in _wake_prefixes(context, event):
-        if text.startswith(prefix):
-            text = text[len(prefix) :].strip()
-            break
-    lowered = text.lower()
-    if lowered == "md":
-        return ""
-    if lowered.startswith("md "):
-        return text[3:].strip()
-    return ""
-
-
-def _parse_md_args(raw: str) -> tuple[str, str]:
-    parts = str(raw or "").strip().split()
-    if not parts:
-        return "", ""
-    if len(parts) == 1:
-        return parts[0].lower(), ""
-    return parts[0].lower(), parts[1].lower()
-
-
-def _apply_toggle(action: str) -> bool | None:
-    if action in {"on", "开", "enable", "1", "true"}:
-        return True
-    if action in {"off", "关", "disable", "0", "false"}:
-        return False
-    if action in {"reset", "default", "默认"}:
-        return None
-    return None
 
 
 class MsgDebuggerStar(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
         self.cfg = config
-        self._sync_store()
-        self._register_page_api()
-
-    def _plugin_data_dir(self) -> Path:
-        return StarTools.get_data_dir(PLUGIN_NAME)
-
-    def _sync_store(self) -> None:
-        persist = bool(self.cfg.get("persist_traces", True))
-        try:
-            persist_max = int(self.cfg.get("max_persist_entries") or 500)
-        except (TypeError, ValueError):
-            persist_max = 500
-        if persist:
-            _TRACE_STORE.configure_persist(
-                enabled=True,
-                path=self._plugin_data_dir() / "traces.jsonl",
-                max_entries=persist_max,
-            )
-        else:
-            try:
-                limit = int(self.cfg.get("max_trace_entries") or 200)
-            except (TypeError, ValueError):
-                limit = 200
-            _TRACE_STORE.set_max_traces(limit)
-
-    def _register_page_api(self) -> None:
-        if not hasattr(self.context, "register_web_api"):
-            logger.warning("MsgDebugger: 当前 AstrBot 不支持 register_web_api，日志 Page 不可用")
-            return
-        try:
-            if register_trace_page_routes(
-                self.context,
-                _TRACE_STORE,
-                self.cfg,
-                data_dir=self._plugin_data_dir(),
-            ):
-                logger.info("MsgDebugger: 已注册 logs 页面 API")
-        except Exception:
-            logger.exception("MsgDebugger: 注册 logs 页面 API 失败")
-
-    def _trace_meta(self, event: AstrMessageEvent) -> dict[str, str]:
-        chat = "私聊" if event.is_private_chat() else "群聊"
-        message_str = (event.message_str or "").strip()
-        return {
-            "at": "",
-            "umo": str(event.unified_msg_origin),
-            "chat": chat,
-            "sender_id": str(event.get_sender_id()),
-            "sender_name": _sender_name(event),
-            "group_id": str(event.get_group_id() or ""),
-            "summary": message_str[:120],
+        data_dir = StarTools.get_data_dir(PLUGIN_NAME)
+        self.store = TraceStore(data_dir, config)
+        self.observer = DebugObserver(context, self._record_stage)
+        register_trace_page_routes(context, self.store, config, observer=self.observer)
+        self._page_handlers = {
+            id(entry[1])
+            for entry in context.registered_web_apis
+            if entry[0].startswith(f"/{PLUGIN_NAME}/page/")
         }
 
-    def _record_stage(
-        self,
-        event: AstrMessageEvent,
-        stage: str,
-        fields: list[dict[str, Any]],
-    ) -> None:
-        if not _trace_enabled(self.cfg) or not fields:
-            return
-        trace_id = _TRACE_STORE.ensure_trace_id(event)
-        _TRACE_STORE.begin_trace(trace_id, self._trace_meta(event))
-        _TRACE_STORE.add_stage(trace_id, stage, fields)
+    def _record_stage(self, event, kind, fields) -> None:
+        """Write an observer record when collection is enabled.
+
+        Args:
+            event: Owning conversation event.
+            kind: Observation category.
+            fields: Detached stage fields.
+        """
+        if self.cfg.get("trace_enabled", True):
+            self.store.record(event, kind, fields)
+
+    async def initialize(self) -> None:
+        """Install observation adapters after registration."""
+        if self.cfg.get("trace_enabled", True):
+            self.observer.install()
+
+    async def terminate(self) -> None:
+        """Restore adapters and discard temporary echo overrides."""
+        self.observer.uninstall()
+        self.context.registered_web_apis[:] = [
+            entry
+            for entry in self.context.registered_web_apis
+            if id(entry[1]) not in self._page_handlers
+        ]
+        RUNTIME.set_echo(None)
 
     @filter.command("md")
-    async def md_command(self, event: AstrMessageEvent) -> None:
-        """MsgDebugger 控制：/md echo on|off|status|reset"""
-        topic, action = _parse_md_args(_md_command_tail(event, self.context))
-        if topic != "echo":
-            yield event.plain_result("用法：/md echo on|off|status|reset")
-            return
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def md_command(self, event: AstrMessageEvent):
+        """Control the echo probe from an administrator conversation.
 
-        if not action or action == "status":
-            yield event.plain_result(_echo_reply(self.cfg))
-            return
+        Args:
+            event: Command message event.
+        """
+        parts = event.get_message_str().strip().lower().split()
+        action = parts[-1] if len(parts) >= 3 and parts[-2] == "echo" else "status"
+        if action in ("on", "off", "reset"):
+            RUNTIME.set_echo({"on": True, "off": False, "reset": None}[action])
+        yield event.plain_result(
+            f"复读：{RUNTIME.echo_status(bool(self.cfg.get('echo_enabled', False)))}\n"
+            "用法：/md echo on|off|status|reset；完整调试请打开插件 Pages → logs。"
+        )
 
-        value = _apply_toggle(action)
-        if value is None and action not in {"reset", "default", "默认"}:
-            yield event.plain_result("用法：/md echo on|off|status|reset")
-            return
+    @filter.event_message_type(filter.EventMessageType.ALL, priority=10000)
+    async def inbound(self, event: AstrMessageEvent) -> None:
+        """Record inbound messages without consuming them.
 
-        RUNTIME.set_echo(value)
-        yield event.plain_result(_echo_reply(self.cfg))
+        Args:
+            event: Incoming platform message.
+        """
+        if str(event.get_sender_id()) != str(event.get_self_id()):
+            self.observer.emit(
+                event,
+                "inbound",
+                {"text": event.message_str, "chain": snapshot(event.get_messages())},
+            )
+
+    @filter.on_llm_request(priority=-10000)
+    async def request_snapshot(self, event, req) -> None:
+        """Capture hook-level requests and optional extension reports.
+
+        Args:
+            event: Owning conversation event.
+            req: Request visible at this hook boundary.
+        """
+        self.observer.emit(
+            event,
+            "request_snapshot",
+            {
+                "level": "plugin_hook",
+                "request": self.observer.handler_snapshot(event, (req,)).get("request"),
+            },
+        )
+        reports = event.get_extra("_msgdebugger_events", [])
+        if isinstance(reports, list):
+            for report in reports[:100]:
+                if isinstance(report, dict):
+                    self.observer.emit(
+                        event,
+                        "extension",
+                        {"evidence": "plugin_reported", "report": report},
+                    )
+            event.set_extra("_msgdebugger_events", [])
+
+    @filter.on_llm_response()
+    async def response(self, event, resp) -> None:
+        """Record the final agent response separately from per-attempt usage.
+
+        Args:
+            event: Owning conversation event.
+            resp: Final response reported by AstrBot.
+        """
+        self.observer.emit(event, "llm_response", {"response": snapshot(resp)})
+
+    @filter.on_using_llm_tool()
+    async def tool_start(self, event, tool, tool_args) -> None:
+        """Record selected tool ownership and arguments.
+
+        Args:
+            event: Owning conversation event.
+            tool: Selected tool.
+            tool_args: Execution arguments.
+        """
+        self.observer.emit(
+            event,
+            "tool_start",
+            {"tool": tool_info(tool), "arguments": snapshot(tool_args)},
+        )
+
+    @filter.on_llm_tool_respond()
+    async def tool_end(self, event, tool, tool_args, tool_result) -> None:
+        """Record the observed tool result.
+
+        Args:
+            event: Owning conversation event.
+            tool: Executed tool.
+            tool_args: Execution arguments.
+            tool_result: Result reported by AstrBot.
+        """
+        self.observer.emit(
+            event,
+            "tool_end",
+            {
+                "tool": tool_info(tool),
+                "arguments": snapshot(tool_args),
+                "result": snapshot(tool_result),
+            },
+        )
+
+    @filter.on_decorating_result(priority=-10000)
+    async def decorating(self, event) -> None:
+        """Capture output at the decoration hook.
+
+        Args:
+            event: Owning conversation event.
+        """
+        self.observer.emit(
+            event, "decorating", {"result": snapshot(event.get_result())}
+        )
+
+    @filter.after_message_sent()
+    async def sent(self, event) -> None:
+        """Record the framework's sent notification.
+
+        Args:
+            event: Owning conversation event.
+        """
+        self.observer.emit(
+            event,
+            "sent",
+            {
+                "result": snapshot(event.get_result()),
+                "evidence": "after_message_sent_hook",
+            },
+        )
 
     @filter.event_message_type(filter.EventMessageType.ALL)
-    async def on_trace_inbound(self, event: AstrMessageEvent) -> None:
-        if not _trace_enabled(self.cfg):
+    async def echo(self, event: AstrMessageEvent):
+        """Echo eligible messages using the configured send path.
+
+        Args:
+            event: Incoming platform message.
+        """
+        if not RUNTIME.echo_enabled(bool(self.cfg.get("echo_enabled", False))):
             return
         if str(event.get_sender_id()) == str(event.get_self_id()):
             return
-        self._record_stage(event, "inbound", build_inbound_fields(event))
-
-    @filter.on_llm_request(priority=100)
-    async def on_trace_llm_request_before(
-        self,
-        event: AstrMessageEvent,
-        req: ProviderRequest,
-    ) -> None:
-        if not _trace_enabled(self.cfg):
-            return
-        event.set_extra(LLM_BEFORE_EXTRA, build_llm_before_snapshot(req))
-
-    @filter.on_llm_request(priority=-100)
-    async def on_trace_llm_request(
-        self,
-        event: AstrMessageEvent,
-        req: ProviderRequest,
-    ) -> None:
-        if not _trace_enabled(self.cfg):
-            return
-        self._record_stage(event, "llm_request", build_llm_request_fields(event, req))
-        injection_fields = build_injection_fields(event, req)
-        if injection_fields:
-            self._record_stage(event, "injection", injection_fields)
-
-    @filter.on_llm_response()
-    async def on_trace_llm_response(self, event: AstrMessageEvent, resp: Any) -> None:
-        if not _trace_enabled(self.cfg):
-            return
-        self._record_stage(event, "llm_response", build_llm_response_fields(resp))
-
-    @filter.on_decorating_result()
-    async def on_trace_decorating(self, event: AstrMessageEvent) -> None:
-        if not _trace_enabled(self.cfg):
-            return
-        self._record_stage(event, "decorating", build_decorating_fields(event))
-
-    @filter.after_message_sent()
-    async def on_trace_sent(self, event: AstrMessageEvent) -> None:
-        if not _trace_enabled(self.cfg):
-            return
-        echo_mode = None
-        if _echo_runtime_enabled(self.cfg) and not _should_skip(event, self.cfg, self.context):
-            echo_mode = _send_mode(self.cfg)
-        self._record_stage(
-            event,
-            "sent",
-            build_sent_fields(event, echo_mode=echo_mode),
-        )
-
-    @filter.event_message_type(filter.EventMessageType.ALL)
-    async def on_passive_echo(self, event: AstrMessageEvent):
-        """被动回复：yield 结果，经 ResultDecorate -> Respond 出站。"""
-        if not _echo_runtime_enabled(self.cfg):
-            return
-        if _send_mode(self.cfg) != _SEND_PASSIVE or _should_skip(
-            event, self.cfg, self.context
+        prefixes = self.context.get_config(umo=event.unified_msg_origin).get(
+            "wake_prefix"
+        ) or ["/"]
+        if isinstance(prefixes, str):
+            prefixes = [prefixes]
+        if any(
+            event.message_str.strip().startswith(p)
+            for p in prefixes
+            if isinstance(p, str) and p
         ):
             return
-
-        chain = _build_chain(event, _echo_content(self.cfg))
-        if not chain:
+        users = {str(v).strip() for v in self.cfg.get("user_whitelist", [])}
+        groups = {str(v).strip() for v in self.cfg.get("group_whitelist", [])}
+        if users and str(event.get_sender_id()) not in users:
             return
-
-        logger.debug(
-            "MsgDebugger: passive echo umo=%s content=%s",
-            event.unified_msg_origin,
-            _echo_content(self.cfg),
-        )
-        yield event.chain_result(chain)
-
-    @filter.event_message_type(filter.EventMessageType.ALL)
-    async def on_proactive_echo(self, event: AstrMessageEvent) -> None:
-        """主动推送：context.send_message，不经被动回复管线。"""
-        if not _echo_runtime_enabled(self.cfg):
-            return
-        if _send_mode(self.cfg) != _SEND_PROACTIVE or _should_skip(
-            event, self.cfg, self.context
+        if (
+            groups
+            and not event.is_private_chat()
+            and str(event.get_group_id()) not in groups
         ):
             return
+        if self.cfg.get("echo_content", "plain") == "chain":
+            chain = copy.deepcopy(event.get_messages())
+        else:
+            from astrbot.api.message_components import Plain
 
-        chain = _build_chain(event, _echo_content(self.cfg))
+            chain = [Plain(event.message_str)] if event.message_str else []
         if not chain:
             return
-
-        logger.debug(
-            "MsgDebugger: proactive echo umo=%s content=%s",
-            event.unified_msg_origin,
-            _echo_content(self.cfg),
+        mode = self.cfg.get("send_mode", "passive")
+        self.observer.emit(
+            event, "echo_start", {"mode": mode, "chain": snapshot(chain)}
         )
-        await self.context.send_message(
-            event.unified_msg_origin,
-            MessageChain(chain),
-        )
+        if mode == "proactive":
+            try:
+                result = await self.context.send_message(
+                    event.unified_msg_origin, MessageChain(chain)
+                )
+                self.observer.emit(
+                    event, "echo_sent", {"mode": mode, "send_return": snapshot(result)}
+                )
+            except Exception as exc:  # noqa: BLE001 - Platform failures must not abort other handlers.
+                self.observer.emit(event, "echo_error", {"error": type(exc).__name__})
+                logger.exception("MsgDebugger echo send failed")
+        else:
+            yield event.chain_result(chain)

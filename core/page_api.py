@@ -1,14 +1,11 @@
-# -*- coding: utf-8 -*-
-"""AstrBot Plugin Pages API（懒加载，不依赖 astrbot.api.web）。"""
+"""Debugger endpoints using the authenticated AstrBot Pages bridge."""
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .runtime import RUNTIME
-from .ui_state import load_ui_state, save_ui_state
 
 if TYPE_CHECKING:
     from astrbot.api import AstrBotConfig
@@ -25,44 +22,127 @@ def register_trace_page_routes(
     store: TraceStore,
     cfg: AstrBotConfig | None = None,
     *,
-    data_dir: Path | None = None,
+    observer: Any = None,
 ) -> bool:
-    """注册 logs 页面 API；不可用时返回 False。"""
+    """Register debugger routes behind the AstrBot Pages bridge.
+
+    Args:
+        context: AstrBot plugin context.
+        store: Bounded trace storage.
+        cfg: Plugin configuration.
+        observer: Runtime observation adapters.
+
+    Returns:
+        Whether the route registration API is available.
+    """
     register = getattr(context, "register_web_api", None)
     if not callable(register):
         return False
 
-    ui_state_path = (data_dir / "logs_ui.json") if data_dir else None
-
     async def list_traces() -> dict:
-        return {"status": "ok", "data": {"traces": store.list_traces()}}
+        return {"status": "ok", "data": {"traces": store.summaries()}}
+
+    async def trace_detail() -> dict:
+        from astrbot.api.web import request
+
+        body = await _read_json_body(request)
+        trace = store.detail(str(body.get("id", "")))
+        if trace is None:
+            return {"status": "error", "message": "记录已清理或不存在"}
+        return {"status": "ok", "data": {"trace": trace}}
+
+    async def inventory() -> dict:
+        import asyncio
+
+        data = await asyncio.to_thread(observer.inventory) if observer else {}
+        return {"status": "ok", "data": data}
+
+    async def echo_control() -> dict:
+        from astrbot.api.web import request
+
+        body = await _read_json_body(request)
+        action = body.get("action")
+        if action not in ("on", "off", "reset"):
+            return {"status": "error", "message": "无效的复读操作"}
+        RUNTIME.set_echo({"on": True, "off": False, "reset": None}[action])
+        return await runtime_status()
+
+    async def compare_requests() -> dict:
+        import difflib
+
+        from astrbot.api.web import request
+
+        body = await _read_json_body(request)
+        values = []
+        for side in ("left", "right"):
+            selection = body.get(side, {})
+            if not isinstance(selection, dict):
+                return {"status": "error", "message": "无效的对比选择"}
+            trace = store.detail(str(selection.get("trace_id", "")))
+            selected = None
+            for stage in (trace or {}).get("stages", []):
+                if stage["key"] != "model_request":
+                    continue
+                data = stage["fields"][0].get("json", {})
+                if data.get("attempt_id") == selection.get("attempt_id"):
+                    selected = data
+                    break
+            if selected is None:
+                return {"status": "error", "message": "请选择两次已采集的模型请求"}
+            if body.get("scope") == "base":
+                selected = {
+                    "messages": [
+                        m
+                        for m in selected.get("messages", [])
+                        if isinstance(m, dict)
+                        and m.get("role") in ("system", "developer")
+                    ],
+                    "tools": selected.get("tools", []),
+                    "extra_user_content_parts": selected.get(
+                        "extra_user_content_parts"
+                    ),
+                }
+            else:
+                selected = {k: v for k, v in selected.items() if k != "attempt_id"}
+            # Expand embedded newlines for readable prompt diffs.
+            values.append(
+                json.dumps(selected, ensure_ascii=False, indent=2, sort_keys=True)
+                .replace("\\n", "\n")
+                .splitlines()
+            )
+        lines = list(
+            difflib.unified_diff(
+                *values, fromfile="上次请求", tofile="本次请求", lineterm=""
+            )
+        )
+        return {
+            "status": "ok",
+            "data": {"lines": lines[:5000], "truncated": len(lines) > 5000},
+        }
 
     async def clear_traces() -> dict:
         store.clear()
         return {"status": "ok", "data": {"cleared": True}}
 
     async def runtime_status() -> dict:
-        echo_cfg = bool(cfg.get("echo_enabled", True)) if cfg else True
+        echo_cfg = bool(cfg.get("echo_enabled", False)) if cfg else False
         data = RUNTIME.snapshot(echo_cfg=echo_cfg)
-        data["ui"] = load_ui_state(ui_state_path) if ui_state_path else {}
+        data["storage_error"] = store.error
+        data["coverage"] = observer.coverage if observer else {}
+        data["send_mode"] = cfg.get("send_mode", "passive") if cfg else "passive"
+        data["echo_content"] = cfg.get("echo_content", "plain") if cfg else "plain"
+        data["trace_enabled"] = bool(cfg.get("trace_enabled", True)) if cfg else True
         return {"status": "ok", "data": data}
 
-    async def save_runtime() -> dict:
-        from astrbot.api import logger
-
-        if not ui_state_path:
-            return {"status": "error", "message": "UI state path unavailable"}
-        try:
-            from astrbot.api.web import request as plugin_request
-        except ImportError:
-            return {"status": "error", "message": "web request unavailable"}
-        body = await _read_json_body(plugin_request)
-        if not save_ui_state(ui_state_path, body):
-            logger.warning("MsgDebugger: ui state save rejected, body=%s", type(body).__name__)
-            return {"status": "error", "message": "invalid ui state payload"}
-        logger.info("MsgDebugger: ui state saved -> %s", ui_state_path)
-        return {"status": "ok", "data": {"saved": True}}
-
+    register(f"{PAGE_PREFIX}/detail", trace_detail, ["POST"], "Read one debug trace")
+    register(f"{PAGE_PREFIX}/inventory", inventory, ["GET"], "Read tools and skills")
+    register(f"{PAGE_PREFIX}/echo", echo_control, ["POST"], "Control echo probe")
+    register(
+        f"{PAGE_PREFIX}/compare",
+        compare_requests,
+        ["POST"],
+        "Compare recorded requests",
+    )
     register(
         f"{PAGE_PREFIX}/traces",
         list_traces,
@@ -80,12 +160,6 @@ def register_trace_page_routes(
         runtime_status,
         ["GET"],
         "MsgDebugger runtime flags",
-    )
-    register(
-        f"{PAGE_PREFIX}/runtime",
-        save_runtime,
-        ["POST"],
-        "Save MsgDebugger logs page UI state",
     )
     return True
 
