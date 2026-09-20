@@ -16,6 +16,7 @@ class Element {
 const source=await fs.readFile(new URL('../pages/logs/app.js',import.meta.url),'utf8');
 const uiSource=await fs.readFile(new URL('../pages/logs/ui.js',import.meta.url),'utf8');
 const conversationSource=await fs.readFile(new URL('../pages/logs/conversation.js',import.meta.url),'utf8');
+const skillsSource=await fs.readFile(new URL('../pages/logs/skills.js',import.meta.url),'utf8');
 const descendants=node=>[node,...node.children.flatMap(descendants)];
 for(const mode of ['unwrapped','envelope','error']) {
   const nodes=new Map(['#content','#tabs','#selection','#notice','#traces','#search','#refresh','#auto'].map(id=>[id,new Element('div')]));
@@ -35,7 +36,8 @@ for(const mode of ['unwrapped','envelope','error']) {
   const ui=new vm.SourceTextModule(uiSource,{context});
   const app=new vm.SourceTextModule(source,{context});
   const conversation=new vm.SourceTextModule(conversationSource,{context});
-  await app.link(specifier=>specifier==='./ui.js'?ui:conversation);
+  const skills=new vm.SourceTextModule(skillsSource,{context});
+  await app.link(specifier=>specifier==='./ui.js'?ui:specifier==='./skills.js'?skills:conversation);
   await app.evaluate();
   if(mode==='error') {
     assert.match(nodes.get('#notice').textContent,/Specific backend failure/);

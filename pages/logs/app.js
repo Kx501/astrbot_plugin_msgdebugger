@@ -241,8 +241,8 @@ function skills() {
   for(const skill of list) {
     const box=card(skill.name,catalog);
     box.append(el('span',skill.active===true?'技能开关：开':skill.active===false?'技能开关：关':'技能开关：未知','badge'));
+    if(skill.plugin_name) box.append(el('span',skill.plugin_registered===false?'所属插件未注册':skill.plugin_active===false?'所属插件已停用':skill.plugin_active===true?'所属插件已启用':'所属插件状态未知，请刷新','badge'));
     box.append(el('p',skill.description),el('small',`来源：${skill.plugin_name||skill.source_label||skill.source_type} · ${skill.path}`,'muted'));
-    if(skill.plugin_name) box.append(el('span',skill.plugin_registered===false?'所属插件未注册 · 不可用':skill.plugin_active===false?'所属插件已停用 · 不可用':skill.plugin_active===true?'所属插件已启用':'所属插件状态未知，请刷新','badge'));
     raw('SKILL.md 当前内容',skill.content ?? skill.content_error ?? '没有本地文件',box);
   }
   for(const error of state.inventory?.errors||[]) hint(error,content);

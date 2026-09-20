@@ -87,7 +87,7 @@ event.set_extra("_msgdebugger_events", reports)
 
 页面入口仍是 **logs**，原“精简 / 注入 / 完整”预设改为八个任务标签；注入详情迁移到“插件改动 / 请求对比”，原复读命令保留并限制管理员使用。旧 JSONL 作为历史数据导入，缺少逐轮快照的记录不能补算工具、对比和用量。旧 `_md_injection` / `_ii_injected` 专用约定不再采集，新接入请使用上述统一报告接口。
 
-[English guide](docs/en/README.md) · [中文导航说明](docs/zh/README.md) · [2.0.0 变更记录](CHANGELOG.md)
+[English guide](docs/en/README.md) · [中文导航说明](docs/zh/README.md) · [变更记录](CHANGELOG.md)
 
 ## 开发检查
 

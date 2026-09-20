@@ -1,25 +1,27 @@
-# Changelog
+# 更新日志
 
-## Unreleased
+## 2.0.1
 
-- Declare `PyYAML` in `requirements.txt`, the only dependency beyond AstrBot and the standard library.
-- Fix Pydantic v1 message snapshots and false GeneratorExit errors after final responses.
-- Add bounded plugin change diffs, including existing records.
-- Separate request skill-directory evidence from current global skill switches and add catalog refresh.
+- 在 `requirements.txt` 中声明 `PyYAML`，这是除 AstrBot 和标准库之外的唯一依赖项。
+- 修复 Pydantic v1 消息快照以及最终响应后出现的虚假 GeneratorExit 错误。
+- 添加有界的插件变更差异，包括现有记录。
+- 将请求技能目录证据与当前全局技能开关分离，并添加目录刷新。
+- 优化技能目录徽标显示效果。
+- 修复页面冒烟测试未加载拆分后的 `skills.js` 导致的模块解析失败。
 
 ## 2.0.0
 
-- Add a guided conversation flow that remains visible across tabs, a beginner API/role guide, and an eight-item message directory with a single-message reader.
-- Group records by platform instance and group/private contact; keep unknown legacy identities separate.
-- Replace flat overview logs with collapsed flow segments and link later attempts to their first changed message. Reduce header, card and toolbar spacing.
-- Navigation mapping: long input cards → directory/reader; flat overview log → flow segments; flat sidebar → contact/group sections. Existing tabs and the logs entry remain.
+- 添加跨标签页保持可见的引导式对话流程、初学者 API/角色指南，以及包含单条消息阅读器的八项消息目录。
+- 按平台实例和群组/私聊联系人分组记录；将未知的旧版身份保持分离。
+- 用折叠的流程片段替换扁平概览日志，并将后续尝试链接到其首次变更的消息。减少页眉、卡片和工具栏间距。
+- 导航映射：长输入卡片 → 目录/阅读器；扁平概览日志 → 流程片段；扁平侧边栏 → 联系人/群组部分。现有标签页和日志入口保持不变。
 
-- Rebuild the debugger around conversation records and eight task-oriented tabs.
-- Observe plugin handler boundaries with reversible adapters and explicit attribution limits.
-- Capture built-in runner attempts, detached input/tool snapshots, responses and reported usage.
-- Add tool and local Skill catalogs, request comparison, export preview and collection coverage.
-- Preserve passive/proactive echo without requiring other plugins; add page controls and restrict chat controls to administrators. New installations default echo to off.
-- Replace whole-file JSONL rewrites with bounded SQLite storage. Import existing JSONL while preserving the original archive.
-- Replace Compact / Injection / Full presets with Overview / Model input / Plugin changes / Tools / Skills / Request comparison / Tokens and timing / Echo and collection. The `logs` page entry remains unchanged.
-- Move injection inspection to Plugin changes and Request comparison. Replace `_md_injection` / `_ii_injected` collection with the optional `_msgdebugger_events` report list.
-- Capture at the runner boundary rather than claiming wire-level visibility. Mark unavailable adapters, missing usage and truncated content explicitly.
+- 围绕对话记录和八个面向任务的标签页重建调试器。
+- 使用可逆适配器和明确归因限制观察插件处理器边界。
+- 捕获内置运行器尝试、分离的输入/工具快照、响应和报告的用量。
+- 添加工具和本地技能目录、请求比较、导出预览和收集覆盖率。
+- 无需其他插件即可保留被动/主动回显；添加页面控件并将聊天控件限制为管理员。新安装默认关闭回显。
+- 用有界 SQLite 存储替换整文件 JSONL 重写。导入现有 JSONL，同时保留原始归档。
+- 用概览/模型输入/插件变更/工具/技能/请求比较/令牌与计时/回显与收集替换紧凑/注入/完整预设。`logs` 页面入口保持不变。
+- 将注入检查移至插件变更和请求比较。用可选的 `_msgdebugger_events` 报告列表替换 `_md_injection` / `_ii_injected` 收集。
+- 在运行器边界捕获，而不是声称具备线路级可见性。明确标记不可用的适配器、缺失的用量和被截断的内容。

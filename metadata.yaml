@@ -1,6 +1,6 @@
 name: astrbot_plugin_msgdebugger
 display_name: MsgDebugger
-version: "2.0.0"
+version: "2.0.1"
 author: "Kx501"
 desc: 透明调试台：插件归因、逐轮模型输入、工具与 Skills、请求对比、Token 和复读探针。
 astrbot_version: ">=4.24.2"
