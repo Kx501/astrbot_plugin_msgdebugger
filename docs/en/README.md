@@ -42,7 +42,7 @@ Start in Overview: it summarizes the trigger, observed model requests, tools and
 
 Model input now uses a paginated directory (8 messages per page) and a single-message reader. It initially selects the last `user`, which may contain injected context. Fifty input messages can belong to one model request. Sequence numbers describe positions in that request's message list, not individual API calls.
 
-The expandable beginner guide explains `model`, `messages`, `tools`, generated responses, `usage`, role relationships and the tool execution loop. Each selected message shows its role's meaning and immediate neighbors. The generated response is shown separately from input. Use role filters or content search to find a specific message.
+The expandable beginner guide explains `model`, `messages`, `tools`, generated responses, `usage`, role relationships and the tool execution loop, plus the extra user content parts. Each selected message shows its role's meaning and immediate neighbors. The generated response is shown separately from input. Use role filters or content search to find a specific message.
 
 For later attempts, the page compares the unchanged prefix against the previous attempt in this trace. A shortcut selects the first new or changed position; it does not claim that all differences are appends. Detailed two-request comparison remains available in its own tab.
 

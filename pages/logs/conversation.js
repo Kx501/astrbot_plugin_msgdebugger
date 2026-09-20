@@ -4,9 +4,9 @@ export const roles = {system:'system · 全局指令',developer:'developer · �
 const meanings = {
   system:'告诉模型如何工作，例如人格、规则、技能目录。通常放在前面，但请以左侧实际顺序为准。',
   developer:'应用提供的行为要求。有些 API 使用这个角色；没有它也是正常的。',
-  user:'输入给模型的问题或材料。AstrBot 也可能在这里拼接时间、引用、插件附加内容，一轮对话中 role 下可以有多个内容块数组。',
+  user:'输入给模型的问题或材料。AstrBot 也可能在这里拼接时间、引用、插件附加内容。',
   assistant:'模型一方的发言。出现在请求里时，它是被带回来的上下文，可能是以前的回复，也可能是要求调用工具；不是本次请求刚生成的回答。',
-  tool:'程序执行工具后交回的结果。模型通常要在下一次请求里读到它，才能据此继续回答。'
+  tool:'程序执行工具后交回的结果。模型通常要在下一次请求里读到它，才能据此继续回答；一轮对话中可以多次调用工具。'
 };
 
 export function conversationGroup(trace) {
@@ -98,13 +98,17 @@ export function inputView(trace,req,state,parent,rerender,open) {
   guide.open=state.guideOpen;
   guide.ontoggle=()=>{state.guideOpen=guide.open;};
   guide.append(el('summary','第一次看 LLM 请求？先用一分钟理解角色、顺序与工具'));
-  guide.append(el('p','AstrBot 把一份输入交给模型，模型再生成输出。你看到的 messages 是这份输入里的有序消息列表，列表有 50 项也可能只调用模型一次。历史内容通常会随请求再次发送，不能假定模型自动记得上次对话。'));
-  const example=el('div',null,'example-flow');
-  for(const text of ['system：你是简洁的助手','user：你好','assistant：你好！','user：帮我查天气','本次输出：assistant'])example.append(el('span',text));
-  guide.append(el('p','请求里常见的 model 决定使用哪个模型，messages 是有序输入，tools 是可选工具目录。返回值包含模型生成的消息，服务商还可能报告 usage（Token 用量）。页面里的“输入”和“输出”对应这两个方向。'));
-  guide.append(example,el('p','上例中，前四项一起作为输入；最后一项由本次调用生成。role 区分消息的用途和说话方，不代表它属于一个单独的请求。实际请求不必严格按 user / assistant 交替，左侧序号才是这条记录里的真实顺序。'));
+  guide.append(el('p','页面里的“输入”和“输出”对应“发给模型的请求”和“模型返回的消息”，请求体按顺序主要看下面几项。'));
+  guide.append(el('p', 'messages：请求的主体，是有序的输入消息列表。下方列表有 50 项但只调用模型一次，历史内容会随请求再次发送。'));
+  guide.append(el('p','role：决定这条消息由谁发出，一般有以下几种身份。'));
   for(const [role,description]of Object.entries(meanings))guide.append(el('p',`${role}：${description}`));
-  guide.append(el('p','tools 是另附的“可用工具目录”（名称、说明、参数），不是一次工具执行。模型返回 assistant 工具调用要求 → AstrBot 执行 → 结果写入 tool 消息 → 再请求模型。一次用户提问因此可能触发多次模型请求。'));
+  guide.append(el('p','content：输入/输出消息的内容，通常是文本，也可能是 JSON、图片或其他结构；一个 content 下可以有多个内容块数组。'));
+  guide.append(el('p','tools：由模型自主决定的可用工具目录，不是一次工具执行。'));
+  guide.append(el('p','extra_user_content：还没并进 messages 的追加内容，例如图片、被引用的消息或插件补的文本。组装成最终请求时，AstrBot 会把它接在同一条 user 消息后面，所以它不是 messages 之外的额外输入；“采集边界与完整原始数据”里显示的是合并前的状态，内容可能和 messages 重复。'));
+  const example=el('div',null,'example-flow');
+  for(const text of ['system：你是简洁的助手','user：帮我查天气','assistant：要求调用 weather','tool：晴 28℃','本次输出：assistant'])example.append(el('span',text));
+  guide.append(example,el('p','上例中，前四项一起作为输入，最后一项是本次生成的。assistant 要求调用工具和 tool 返回结果这两项，就是 AstrBot 执行完工具并再次请求模型时带回来的上下文。实际请求不必严格按 user / assistant 交替，左侧序号才是真实顺序。'));
+  guide.append(el('p','返回值中服务商还可能报告 usage（Token 用量）。'));
   parent.append(guide);
   if(!req) {
     hint('本记录没有逐轮请求快照。以下仅有插件钩子快照，不能补出完整调用顺序。',parent);
