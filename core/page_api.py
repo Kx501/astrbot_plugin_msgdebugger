@@ -43,12 +43,45 @@ def register_trace_page_routes(
         return {"status": "ok", "data": {"traces": store.summaries()}}
 
     async def trace_detail() -> dict:
+        import difflib
+
         from astrbot.api.web import request
 
         body = await _read_json_body(request)
         trace = store.detail(str(body.get("id", "")))
         if trace is None:
             return {"status": "error", "message": "记录已清理或不存在"}
+        # Compute on detached detail data so older records gain the same diff view.
+        for stage in trace.get("stages", []):
+            if stage.get("key") != "plugin_change":
+                continue
+            data = next(
+                (
+                    f.get("json", {})
+                    for f in stage.get("fields", [])
+                    if f.get("key") == "detail"
+                ),
+                {},
+            )
+            if not data.get("changed"):
+                continue
+            values = []
+            truncated = False
+            for side in ("before", "after"):
+                value = json.dumps(
+                    data.get(side), ensure_ascii=False, indent=2, sort_keys=True
+                )
+                truncated |= len(value) > 128000
+                values.append(value[:128000].replace("\\n", "\n").splitlines())
+            lines = []
+            for line in difflib.unified_diff(
+                *values, fromfile="修改前", tofile="修改后", lineterm="", n=2
+            ):
+                if len(lines) >= 2000:
+                    truncated = True
+                    break
+                lines.append(line)
+            data["diff"] = {"lines": lines, "truncated": truncated}
         return {"status": "ok", "data": {"trace": trace}}
 
     async def inventory() -> dict:

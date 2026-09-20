@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Declare `PyYAML` in `requirements.txt`, the only dependency beyond AstrBot and the standard library.
+- Fix Pydantic v1 message snapshots and false GeneratorExit errors after final responses.
+- Add bounded plugin change diffs, including existing records.
+- Separate request skill-directory evidence from current global skill switches and add catalog refresh.
+
 ## 2.0.0
 
 - Add a guided conversation flow that remains visible across tabs, a beginner API/role guide, and an eight-item message directory with a single-message reader.

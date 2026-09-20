@@ -1,0 +1,3 @@
+# Runtime dependencies beyond AstrBot and the Python standard library.
+# AstrBot does not ship PyYAML, and it is required to read local Skill frontmatter.
+PyYAML>=6.0

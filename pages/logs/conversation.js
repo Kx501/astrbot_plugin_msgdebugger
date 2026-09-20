@@ -4,8 +4,8 @@ export const roles = {system:'system · 全局指令',developer:'developer · �
 const meanings = {
   system:'告诉模型如何工作，例如人格、规则、技能目录。通常放在前面，但请以左侧实际顺序为准。',
   developer:'应用提供的行为要求。有些 API 使用这个角色；没有它也是正常的。',
-  user:'输入给模型的问题或材料。AstrBot 也可能在这里拼接时间、引用、插件附加内容，所以不一定全是用户亲手输入的文字。',
-  assistant:'模型一方的发言。出现在请求里时，它是被带回来的上下文，可能是以前的回复，也可能是要求调用工具；不是这次请求刚生成的答案。',
+  user:'输入给模型的问题或材料。AstrBot 也可能在这里拼接时间、引用、插件附加内容，一轮对话中 role 下可以有多个内容块数组。',
+  assistant:'模型一方的发言。出现在请求里时，它是被带回来的上下文，可能是以前的回复，也可能是要求调用工具；不是本次请求刚生成的回答。',
   tool:'程序执行工具后交回的结果。模型通常要在下一次请求里读到它，才能据此继续回答。'
 };
 
@@ -63,10 +63,11 @@ export function overviewView(trace,parent,open) {
     const changes=block.stages.filter(s=>s.key==='plugin_change'&&dataOf(s).changed);
     const calls=block.stages.filter(s=>s.key==='tool_start').map(s=>dataOf(s).tool?.name || '未知工具');
     if(block.kind==='request') {
-      const response=block.stages.find(s=>['model_response','model_error'].includes(s.key));
+      const response=block.stages.find(s=>['model_response','model_error','model_interrupted'].includes(s.key));
       const d=dataOf(response);
       parts.push(`携带 ${block.request.messages?.length ?? '?'} 条消息`);
-      if(d.error||d.response?.role==='err') parts.push('请求异常');
+      if(response?.key==='model_interrupted') parts.push('请求中断');
+      else if(d.error||d.response?.role==='err') parts.push('请求异常');
       else if(d.response?.tools_call_name?.length) parts.push(`模型要求调用 ${d.response.tools_call_name.join('、')}`);
       else parts.push(response?'模型返回内容':'尚无响应记录');
     }
@@ -82,7 +83,8 @@ export function overviewView(trace,parent,open) {
       if(stage.key==='plugin_change') {
         if(!d.changed&&!d.error)continue;
         title=`插件 ${d.source || '未知'} · ${d.changed?'改动了 '+Object.keys(d.after||{}).filter(k=>JSON.stringify(d.before?.[k])!==JSON.stringify(d.after?.[k])).join('、'):'执行异常'}`;
-      } else title=({inbound:'收到原始消息',request_snapshot:'准备请求快照',model_request:'将输入交给模型',model_response:'收到模型响应',model_error:'模型请求异常',tool_start:'开始执行工具',tool_end:'收到工具结果',llm_response:'Agent 最终回复',decorating:'处理即将发送的消息',sent:'AstrBot 发出发送通知',echo_start:'开始复读',echo_sent:'主动复读返回',echo_error:'复读异常',extension:'插件补充报告'})[stage.key]||stage.key;
+      } else title=({inbound:'收到原始消息',request_snapshot:'准备请求快照',model_request:'将输入交给模型',model_response:'收到模型响应',model_error:'模型请求异常',model_interrupted:'模型请求中断（未取得完整响应）',tool_start:'开始执行工具',tool_end:'收到工具结果',llm_response:'Agent 最终回复',decorating:'处理即将发送的消息',sent:'AstrBot 发出发送通知',echo_start:'开始复读',echo_sent:'主动复读返回',echo_error:'复读异常',extension:'插件补充报告'})[stage.key]||stage.key;
+      if(stage.key==='model_error' && d.error==='GeneratorExit' && stages.some(s=>s.key==='model_response' && dataOf(s).attempt_id===d.attempt_id)) title='响应返回后迭代器关闭';
       if(d.tool?.name) title+=` · ${d.tool.name}`;
       raw(`${stage.at || ''} ${title}`,Object.keys(d).length?d:stage.fields,detail);
     }

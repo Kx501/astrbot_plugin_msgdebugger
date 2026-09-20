@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import functools
 import inspect
@@ -65,6 +66,16 @@ def snapshot(value: Any, depth: int = 0) -> Any:
     if hasattr(value, "model_dump"):
         try:
             return snapshot(value.model_dump(mode="json"), depth + 1)
+        except Exception:
+            return f"[unavailable: {type(value).__name__} serialization failed]"
+    # AstrBot message components use Pydantic v1 on Python < 3.14.
+    # Read declared fields only; transport serializers may access media files.
+    fields = getattr(type(value), "__fields__", None)
+    if isinstance(fields, dict):
+        try:
+            return snapshot(
+                {name: getattr(value, name) for name in list(fields)[:500]}, depth + 1
+            )
         except Exception:
             return f"[unavailable: {type(value).__name__} serialization failed]"
     if hasattr(value, "completion_text") and hasattr(value, "tools_call_name"):
@@ -441,6 +452,21 @@ class DebugObserver:
                                 },
                             )
                         yield response
+                except (GeneratorExit, asyncio.CancelledError) as exc:
+                    if not completed:
+                        self.emit(
+                            event,
+                            "model_interrupted",
+                            {
+                                "attempt_id": attempt,
+                                "reason": type(exc).__name__,
+                                "duration_ms": round(
+                                    (time.perf_counter() - started) * 1000, 2
+                                ),
+                            },
+                        )
+                    completed = True
+                    raise
                 except BaseException as exc:
                     completed = True
                     self.emit(
@@ -517,6 +543,11 @@ class DebugObserver:
                 else {}
             )
             roots = [(Path(get_astrbot_skills_path()), "local", False)]
+            plugins = {
+                plugin.root_dir_name: plugin
+                for plugin in self.context.get_all_stars()
+                if plugin.root_dir_name
+            }
             plugins_root = Path(get_astrbot_plugin_path())
             if plugins_root.is_dir():
                 roots.extend(
@@ -524,7 +555,7 @@ class DebugObserver:
                     for p in sorted(plugins_root.iterdir())
                     if p.is_dir()
                 )
-            for plugin in self.context.get_all_stars():
+            for plugin in plugins.values():
                 if plugin.reserved and plugin.root_dir_name:
                     roots.append(
                         (
@@ -559,6 +590,11 @@ class DebugObserver:
                         "description": "",
                         "content": None,
                     }
+                    owner = plugins.get(source) if plugin_root else None
+                    item["plugin_registered"] = bool(owner) if plugin_root else None
+                    item["plugin_active"] = (
+                        bool(owner and owner.activated) if plugin_root else None
+                    )
                     try:
                         with path.open(encoding="utf-8") as stream:
                             content = stream.read(64001)

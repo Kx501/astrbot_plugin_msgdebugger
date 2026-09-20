@@ -52,7 +52,7 @@
 
 ## 存储和限制
 
-插件数据目录：`traces.sqlite3`。使用 Python 标准库 SQLite，无新增 Python / 前端依赖。
+插件数据目录：`traces.sqlite3`。使用 Python 标准库 SQLite，前端不引入框架；仅需 `PyYAML`（读取 Skill frontmatter），见 [requirements.txt](requirements.txt)。
 
 - 默认保留 200 条，数量可配置为 10–1000。
 - 单阶段 256 KiB、单记录 2 MiB / 300 阶段；内存与持久化内容各约 64 MiB 上限。

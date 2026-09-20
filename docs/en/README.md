@@ -20,7 +20,7 @@ Provider-reported token usage is shown per attempt; missing usage is not zero. C
 
 New installations leave echo off. Existing configured defaults are retained on upgrade. Administrators can use `/md echo on|off|status|reset`, or the page controls. Temporary overrides reset on reload. Configure passive/proactive sending, plain/full-chain content and echo-only allowlists in plugin settings. No other plugin is required.
 
-Records use `traces.sqlite3` in the plugin data directory. Retention defaults to 200 records; the configured range is 10–1000. Limits are 256 KiB per stage, 2 MiB/300 stages per trace and about 64 MiB of stored content. Inline base64 media is omitted and truncation is marked. Storage failure degrades to memory and is displayed. The database imports legacy JSONL on first creation without deleting it; clearing the page does not remove that legacy backup.
+Records use `traces.sqlite3` in the plugin data directory. Retention defaults to 200 records; the configured range is 10–1000. Limits are 256 KiB per stage, 2 MiB/300 stages per trace and about 64 MiB of stored content. Inline base64 media is omitted and truncation is marked. Storage failure degrades to memory and is displayed. The database imports legacy JSONL on first creation without deleting it; clearing the page does not remove that legacy backup. Storage uses the Python standard library SQLite driver; the only third-party runtime dependency is `PyYAML`, used to read Skill frontmatter (see `requirements.txt`).
 
 Export offers a preview, hiding top-level identity fields and some common credential patterns. Review conversation bodies and tool arguments before sharing; automatic redaction is not comprehensive.
 
@@ -49,3 +49,13 @@ For later attempts, the page compares the unchanged prefix against the previous 
 ![Single-message input reader, using synthetic data](../images/input-reader.png)
 
 Navigation mapping: the former long input card list becomes the directory/reader; the flat overview log becomes collapsed flow segments; the flat sidebar becomes grouped records. The eight tabs and `logs` page URL remain. Compact spacing and independent desktop scroll areas reserve more room for content, with a stacked narrow-screen layout. Reload the plugin to capture group/private metadata for new records; missing legacy metadata is not guessed.
+
+## Changes and collection status
+
+Skill switches and owning plugin activation are shown separately. AstrBot filters skills from inactive or unregistered plugins even if their skill switches remain on. The selected request inventory remains the evidence of what was offered.
+
+Plugin changes now show a compact deletion/addition diff above the original snapshots. Long diffs are marked as truncated; reopening old records also computes diffs.
+
+Skills separates the selected request inventory from current local files and global switches. Persona and configuration filters can reduce the request inventory. A listed skill is not proof of reading or execution. Refresh the current catalog after changing switches. Custom prompt formats and truncated snapshots may not be recognized.
+
+New records support AstrBot Pydantic v1 message components. Missing component data in old snapshots cannot be recovered. GeneratorExit after a final response is no longer an error; closure or cancellation before a final response is an interruption. Historical false positives remain annotated with their original payloads.

@@ -1,9 +1,10 @@
 import {el, card, raw, button, select, hint, dataOf} from './ui.js';
+import {requestSkills} from './skills.js';
 import {conversationGroup, buildJourney, overviewView, inputView} from './conversation.js';
 
 const bridge = window.AstrBotPluginPage;
 const tabs = [['overview','过程总览'],['input','模型输入'],['plugins','插件改动'],['tools','工具'],['skills','Skills'],['compare','请求对比'],['usage','Token 与耗时'],['settings','复读与采集']];
-const labels = {inbound:'收到消息',request_snapshot:'准备模型请求',model_request:'请求模型',model_response:'模型返回',model_error:'模型请求异常',plugin_change:'插件执行',tool_start:'调用工具',tool_end:'工具返回',llm_response:'最终回复',decorating:'装饰回复',sent:'发送通知',echo_start:'复读开始',echo_sent:'主动复读返回',echo_error:'复读失败',extension:'插件补充报告'};
+const labels = {inbound:'收到消息',request_snapshot:'准备模型请求',model_request:'请求模型',model_response:'模型返回',model_error:'模型请求异常',model_interrupted:'模型请求中断',plugin_change:'插件执行',tool_start:'调用工具',tool_end:'工具返回',llm_response:'最终回复',decorating:'装饰回复',sent:'发送通知',echo_start:'复读开始',echo_sent:'主动复读返回',echo_error:'复读失败',extension:'插件补充报告'};
 const state = {traces:[], trace:null, tab:'overview', attempt:0, runtime:{}, inventory:null, left:null, leftAttempt:0, scope:'base', changesOnly:true, groupOpen:new Map(), groupPages:new Map(), messageIndex:null, messagePage:0, inputFilter:'all', inputQuery:'', guideOpen:false};
 let busy = false;
 let selectionVersion = 0;
@@ -179,6 +180,12 @@ function plugins() {
     if(data.duration_ms!==undefined) box.append(el('small',`${data.duration_ms} ms`,'muted'));
     if(data.error) box.append(el('p',data.error,'bad'));
     if(data.changed) {
+      const diff=el('details');diff.open=true;
+      diff.append(el('summary','变化内容 · − 删除 / + 新增'));
+      const pre=el('pre');diff.append(pre);box.append(diff);
+      for(const line of data.diff?.lines || []) pre.append(el('span',line,'diff-line'+(line.startsWith('+')?' add':line.startsWith('-')?' remove':'')));
+      if(!data.diff) hint('请重新打开这条记录以加载差异。',diff);
+      if(data.diff?.truncated) hint('差异过长，已截断；请结合下方修改前后内容查看。',diff);
       for(const key of new Set([...Object.keys(data.before||{}),...Object.keys(data.after||{})])) {
         if(JSON.stringify(data.before?.[key])===JSON.stringify(data.after?.[key])) continue;
         raw(`${key} · 修改前`,data.before?.[key],box);
@@ -215,15 +222,27 @@ function tools() {
 
 function skills() {
   requestPicker(content);
-  hint('这里是当前可读取的本地 / 插件 Skills 文件。请求中出现目录条目不代表模型已读取全文；下方只标注文本匹配证据。历史请求内容以“模型输入”快照为准，当前文件可能已经更新。沙箱及工作区专属 Skills 可能不在此目录。',content);
-  const text=JSON.stringify(current()?.messages || []);
+  const req=current();
+  const offered=requestSkills(req?.messages || []);
   const list=state.inventory?.skills || [];
-  if(!list.length) hint(state.inventory?'当前没有可读取的 Skills。':'正在加载 Skills…',content);
+  const header=card(req?`本次请求携带的技能目录 · ${offered.length} 项`:'先选择一次模型请求',content);
+  hint('“本次携带”从选中请求的 system / developer 技能目录提取，反映人格和配置筛选后的输入。目录进入请求不等于模型读取了 SKILL.md 全文，也不等于执行了技能。',header);
+  if(req && !offered.length) hint('这份快照中没有识别到 AstrBot 标准技能目录。全部停用时这是正常的；自定义格式或被截断的目录暂时无法识别。',header);
+  for(const skill of offered) {
+    const box=card(skill.name,header);
+    box.append(el('span',`本次携带 · 消息 #${skill.messageIndex+1}`,'badge'));
+    box.append(el('p',skill.description),el('small',skill.path,'muted'));
+  }
+  const enabled=list.filter(s=>s.active===true).length;
+  const catalog=card(`当前本地文件目录 · ${list.length} 项 / 技能开关开启 ${enabled} 项`,content);
+  hint('技能开关和所属插件状态分别显示：插件停用或未注册时，即使技能开关开启，AstrBot 也会过滤该插件技能。人格、配置和运行环境还会继续筛选；沙箱及工作区文件可能不在本地目录中。停用技能仍保留在这里供检查。',catalog);
+  button('刷新当前目录',async()=>{state.inventory=await api('inventory');render();},catalog);
+  if(!list.length) hint(state.inventory?'当前没有可读取的 Skills。':'正在加载 Skills…',catalog);
   for(const skill of list) {
-    const box=card(skill.name,content);
-    box.append(el('span',skill.active?'当前启用':'当前停用','badge'));
-    if(current()) box.append(el('span',text.includes(skill.path)||text.includes(skill.name)?'请求中找到名称 / 路径文本':'未找到名称 / 路径文本','badge'));
+    const box=card(skill.name,catalog);
+    box.append(el('span',skill.active===true?'技能开关：开':skill.active===false?'技能开关：关':'技能开关：未知','badge'));
     box.append(el('p',skill.description),el('small',`来源：${skill.plugin_name||skill.source_label||skill.source_type} · ${skill.path}`,'muted'));
+    if(skill.plugin_name) box.append(el('span',skill.plugin_registered===false?'所属插件未注册 · 不可用':skill.plugin_active===false?'所属插件已停用 · 不可用':skill.plugin_active===true?'所属插件已启用':'所属插件状态未知，请刷新','badge'));
     raw('SKILL.md 当前内容',skill.content ?? skill.content_error ?? '没有本地文件',box);
   }
   for(const error of state.inventory?.errors||[]) hint(error,content);

@@ -6,3 +6,6 @@ venv/
 */node_modules/
 /data/
 *.egg-info/
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/

@@ -11,6 +11,8 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -95,6 +97,52 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self):
         self.observer.uninstall()
+
+    async def test_detail_diff_supports_existing_records_without_mutating_storage(self):
+        page_api = importlib.import_module("core.page_api")
+        routes = {}
+
+        async def body(default=None):
+            return {"id": trace_id}
+
+        sys.modules["astrbot.api.web"] = SimpleNamespace(
+            request=SimpleNamespace(json=body)
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            store = TraceStore(Path(tmp), {"persist_traces": False})
+            event = Event()
+            store.record(
+                event,
+                "plugin_change",
+                [
+                    {
+                        "key": "detail",
+                        "json": {
+                            "changed": True,
+                            "before": {"response": "unchanged\nold"},
+                            "after": {"response": "unchanged\nnew"},
+                        },
+                    }
+                ],
+            )
+            trace_id = event.get_extra("_md_trace_id")
+            context = SimpleNamespace(
+                register_web_api=lambda path, handler, *args: routes.update(
+                    {path: handler}
+                )
+            )
+            page_api.register_trace_page_routes(context, store)
+            result = await routes[f"{page_api.PAGE_PREFIX}/detail"]()
+            data = result["data"]["trace"]["stages"][0]["fields"][0]["json"]
+            self.assertTrue(
+                any(line.startswith("-old") for line in data["diff"]["lines"])
+            )
+            self.assertTrue(
+                any(line.startswith("+new") for line in data["diff"]["lines"])
+            )
+            self.assertNotIn(
+                "diff", store.detail(trace_id)["stages"][0]["fields"][0]["json"]
+            )
 
     async def test_return_identity_and_detached_attribution(self):
         returned = object()
@@ -187,6 +235,8 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
 
             async def _iter_llm_responses(self, **kwargs):
                 yield Response(is_chunk=True)
+                if self.run_context.context.event.unified_msg_origin == "failure":
+                    raise ValueError("provider failure")
                 await asyncio.sleep(0)
                 yield Response(
                     usage={"input_other": 10, "input_cached": 2, "output": 3}
@@ -210,11 +260,83 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(records[0][2]["attempt_id"], records[1][2]["attempt_id"])
             self.assertEqual(records[0][2]["messages"][0]["content"], name)
+        iterator = Runner("closed_after_final")._iter_llm_responses()
+        await anext(iterator)
+        await anext(iterator)
+        await iterator.aclose()
+        self.assertEqual(
+            [r[1] for r in self.records if r[0] == "closed_after_final"],
+            ["model_request", "model_response"],
+        )
+        iterator = Runner("closed_during_stream")._iter_llm_responses()
+        await anext(iterator)
+        await iterator.aclose()
+        self.assertEqual(
+            [r[1] for r in self.records if r[0] == "closed_during_stream"],
+            ["model_request", "model_interrupted"],
+        )
+        with self.assertRaisesRegex(ValueError, "provider failure"):
+            await collect("failure")
+        self.assertEqual(
+            [r[1] for r in self.records if r[0] == "failure"],
+            ["model_request", "model_error"],
+        )
         self.observer.uninstall()
         self.assertIs(Runner._iter_llm_responses, original)
 
 
 class StorageTests(unittest.TestCase):
+    def test_plugin_skill_switch_is_separate_from_plugin_activation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            folder = root / "plugins" / "example" / "skills"
+            folder.mkdir(parents=True)
+            (folder / "SKILL.md").write_text("Example skill", encoding="utf-8")
+            (root / "skills.json").write_text(
+                '{"skills":{"example":{"active":true}}}', encoding="utf-8"
+            )
+            paths = SimpleNamespace(
+                get_astrbot_data_path=lambda: str(root),
+                get_astrbot_skills_path=lambda: str(root / "skills"),
+                get_astrbot_plugin_path=lambda: str(root / "plugins"),
+                get_astrbot_builtin_plugin_path=lambda: str(root / "builtin"),
+            )
+            plugin = SimpleNamespace(
+                root_dir_name="example", reserved=False, activated=False
+            )
+            context = SimpleNamespace(get_all_stars=lambda: [plugin])
+            observer = observer_module.DebugObserver(context, None)
+            with patch.dict(sys.modules, {"astrbot.core.utils.astrbot_path": paths}):
+                skill = observer.inventory()["skills"][0]
+                self.assertTrue(skill["active"])
+                self.assertTrue(skill["plugin_registered"])
+                self.assertFalse(skill["plugin_active"])
+                plugin.activated = True
+                self.assertTrue(observer.inventory()["skills"][0]["plugin_active"])
+                context.get_all_stars = list
+                skill = observer.inventory()["skills"][0]
+                self.assertFalse(skill["plugin_registered"])
+                self.assertFalse(skill["plugin_active"])
+
+    def test_legacy_message_fields_are_captured_without_transport_serialization(self):
+        class Plain:
+            __fields__: ClassVar[dict] = {"type": object(), "text": object()}
+            type = "Plain"
+            text = "成都明天会下雨吗？"
+
+            def toDict(self):
+                raise AssertionError("Transport serializer must not run")
+
+        class At:
+            __fields__: ClassVar[dict] = {"type": object(), "qq": object()}
+            type = "At"
+            qq = "123"
+
+        self.assertEqual(
+            observer_module.snapshot([At(), Plain()]),
+            [{"type": "At", "qq": "123"}, {"type": "Plain", "text": Plain.text}],
+        )
+
     def test_conversation_metadata_is_saved_and_available_in_summaries(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = TraceStore(Path(tmp), {"persist_traces": True})
