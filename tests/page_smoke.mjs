@@ -50,14 +50,14 @@ for(const mode of ['unwrapped','envelope','error']) {
   assert.equal(nodes.get('#tabs').children.length,8);
   const nestedJourney=conversation.namespace.buildJourney({stages:[
     {key:'decorating',fields:[{key:'detail',json:{}}]},
-    {key:'tool_start',fields:[{key:'detail',json:{tool:{name:'transfer_to_media_generator'}}}]},
+    {key:'tool_start',fields:[{key:'detail',json:{tool:{name:'random_image'},agent_scope:'nested'}}]},
     {key:'model_request',fields:[{key:'detail',json:{attempt_id:'nested',messages:[]}}]},
     {key:'model_response',fields:[{key:'detail',json:{attempt_id:'nested',response:{}}}]},
-    {key:'tool_end',fields:[{key:'detail',json:{tool:{name:'transfer_to_media_generator'}}}]},
+    {key:'tool_end',fields:[{key:'detail',json:{tool:{name:'random_image'},agent_scope:'nested'}}]},
     {key:'llm_response',fields:[{key:'detail',json:{response:{}}}]},
     {key:'sent',fields:[{key:'detail',json:{}}]},
   ]});
-  assert.equal(JSON.stringify(nestedJourney.map(block=>block.title)),JSON.stringify(['发送前处理','工具执行 · transfer_to_media_generator','请求 1','工具返回 · transfer_to_media_generator','Agent 输出','发送完成']));
+  assert.equal(JSON.stringify(nestedJourney.map(block=>block.title)),JSON.stringify(['发送前处理','子代理工具执行 · random_image','请求 1','子代理工具返回 · random_image','Agent 输出','发送完成']));
   for(const name of ['模型输入','插件改动','工具','Skills','请求对比','Token 与耗时','复读与采集','过程总览']) {
     const tab=nodes.get('#tabs').children.find(n=>n.textContent===name);
     await tab.onclick();

@@ -169,7 +169,12 @@ class DebugObserver:
         self.record = record
         self.patches = []
         self.active = False
-        self.coverage = {"handlers": False, "runner": False, "wire_payload": False}
+        self.coverage = {
+            "handlers": False,
+            "runner": False,
+            "runner_tools": False,
+            "wire_payload": False,
+        }
 
     def emit(self, event, kind: str, data: dict) -> None:
         """Isolate collection failures from the conversation being observed.
@@ -519,6 +524,77 @@ class DebugObserver:
             self.coverage["runner"] = True
         except Exception:
             logger.warning("MsgDebugger runner adapter unavailable", exc_info=True)
+        try:
+            from astrbot.core.agent.hooks import BaseAgentRunHooks
+
+            tool_start_original = BaseAgentRunHooks.on_tool_start
+            tool_end_original = BaseAgentRunHooks.on_tool_end
+
+            @functools.wraps(tool_start_original)
+            async def nested_tool_start(hooks, run_context, tool, tool_args):
+                event = getattr(getattr(run_context, "context", None), "event", None)
+                try:
+                    self.emit(
+                        event,
+                        "tool_start",
+                        {
+                            "tool": tool_info(tool),
+                            "arguments": snapshot(tool_args),
+                            "evidence": "default_agent_hook",
+                            "agent_scope": "nested",
+                        },
+                    )
+                except Exception:
+                    logger.debug(
+                        "MsgDebugger nested tool start unavailable", exc_info=True
+                    )
+                return await tool_start_original(hooks, run_context, tool, tool_args)
+
+            @functools.wraps(tool_end_original)
+            async def nested_tool_end(hooks, run_context, tool, tool_args, tool_result):
+                returned = await tool_end_original(
+                    hooks, run_context, tool, tool_args, tool_result
+                )
+                event = getattr(getattr(run_context, "context", None), "event", None)
+                try:
+                    self.emit(
+                        event,
+                        "tool_end",
+                        {
+                            "tool": tool_info(tool),
+                            "arguments": snapshot(tool_args),
+                            "result": snapshot(tool_result),
+                            "evidence": "default_agent_hook",
+                            "agent_scope": "nested",
+                        },
+                    )
+                except Exception:
+                    logger.debug(
+                        "MsgDebugger nested tool result unavailable", exc_info=True
+                    )
+                return returned
+
+            BaseAgentRunHooks.on_tool_start = nested_tool_start
+            BaseAgentRunHooks.on_tool_end = nested_tool_end
+            self.patches.extend(
+                (
+                    (
+                        BaseAgentRunHooks,
+                        "on_tool_start",
+                        tool_start_original,
+                        nested_tool_start,
+                    ),
+                    (
+                        BaseAgentRunHooks,
+                        "on_tool_end",
+                        tool_end_original,
+                        nested_tool_end,
+                    ),
+                )
+            )
+            self.coverage["runner_tools"] = True
+        except Exception:
+            logger.warning("MsgDebugger nested tool adapter unavailable", exc_info=True)
 
     def uninstall(self) -> None:
         """Restore only adapters still owned by this observer."""

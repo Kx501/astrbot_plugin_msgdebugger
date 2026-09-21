@@ -27,9 +27,11 @@ export function buildJourney(trace) {
       last={kind:'request',title:req.attempt_id?`请求 ${attempt+1}`:'请求快照缺失',attempt:req.attempt_id?attempt:null,request:req,stages:[]};
       blocks.push(last);
     } else if(stage.key==='tool_start') {
-      last={kind:'tool',title:`工具执行 · ${dataOf(stage).tool?.name || '未知工具'}`,stages:[]};blocks.push(last);
+      const data=dataOf(stage);
+      last={kind:'tool',title:`${data.agent_scope==='nested'?'子代理工具执行':'工具执行'} · ${data.tool?.name || '未知工具'}`,stages:[]};blocks.push(last);
     } else if(stage.key==='tool_end' && last?.kind!=='tool') {
-      last={kind:'tool',title:`工具返回 · ${dataOf(stage).tool?.name || '未知工具'}`,stages:[]};blocks.push(last);
+      const data=dataOf(stage);
+      last={kind:'tool',title:`${data.agent_scope==='nested'?'子代理工具返回':'工具返回'} · ${data.tool?.name || '未知工具'}`,stages:[]};blocks.push(last);
     } else if(stage.key==='llm_response') {
       last={kind:'output',title:'Agent 输出',stages:[]};blocks.push(last);
     } else if(stage.key==='decorating' && last?.kind!=='decorate') {

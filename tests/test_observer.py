@@ -27,11 +27,23 @@ for name in (
     "astrbot.core.star.star",
     "astrbot.core.star.star_handler",
     "astrbot.core.agent",
+    "astrbot.core.agent.hooks",
     "astrbot.core.agent.runners",
     "astrbot.core.agent.runners.tool_loop_agent_runner",
 ):
     sys.modules[name] = types.ModuleType(name)
 sys.modules["astrbot.api"].logger = logging.getLogger("debugger-tests")
+
+
+class BaseAgentRunHooks:
+    async def on_tool_start(self, run_context, tool, tool_args):
+        pass
+
+    async def on_tool_end(self, run_context, tool, tool_args, tool_result):
+        pass
+
+
+sys.modules["astrbot.core.agent.hooks"].BaseAgentRunHooks = BaseAgentRunHooks
 star_module = sys.modules["astrbot.core.star.star"]
 star_module.star_map = {"plugin.alpha": SimpleNamespace(name="alpha")}
 observer_module = importlib.import_module("core.observer")
@@ -249,7 +261,29 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
             "astrbot.core.agent.runners.tool_loop_agent_runner"
         ].ToolLoopAgentRunner = Runner
         original = Runner._iter_llm_responses
+        original_tool_start = BaseAgentRunHooks.on_tool_start
+        original_tool_end = BaseAgentRunHooks.on_tool_end
         self.observer.install()
+
+        nested_hooks = BaseAgentRunHooks()
+        nested_context = SimpleNamespace(context=SimpleNamespace(event=Event("nested")))
+        nested_tool = SimpleNamespace(
+            name="random_image",
+            description="Generate a random image",
+            parameters={"type": "object"},
+            active=True,
+            handler_module_path="plugin.alpha",
+        )
+        nested_result = {"path": "image.png"}
+        await nested_hooks.on_tool_start(nested_context, nested_tool, {"count": 1})
+        await nested_hooks.on_tool_end(
+            nested_context, nested_tool, {"count": 1}, nested_result
+        )
+        nested_records = [r for r in self.records if r[0] == "nested"]
+        self.assertEqual([r[1] for r in nested_records], ["tool_start", "tool_end"])
+        self.assertEqual(nested_records[0][2]["tool"]["name"], "random_image")
+        self.assertEqual(nested_records[1][2]["result"], nested_result)
+        self.assertEqual(nested_records[0][2]["agent_scope"], "nested")
 
         async def collect(name):
             return [item async for item in Runner(name)._iter_llm_responses()]
@@ -286,6 +320,8 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         )
         self.observer.uninstall()
         self.assertIs(Runner._iter_llm_responses, original)
+        self.assertIs(BaseAgentRunHooks.on_tool_start, original_tool_start)
+        self.assertIs(BaseAgentRunHooks.on_tool_end, original_tool_end)
 
 
 class StorageTests(unittest.TestCase):

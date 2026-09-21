@@ -52,6 +52,8 @@ Navigation mapping: the former long input card list becomes the directory/reader
 
 ## Changes and collection status
 
+Tool records cover both main-agent AstrBot events and nested `tool_loop_agent` runs that use the default agent hooks. Nested calls carry `agent_scope: nested`. Tools behind custom agent hooks or third-party runners may still be visible only as model requests; the page does not treat a requested tool as proof of execution.
+
 Skill switches and owning plugin activation are shown separately. AstrBot filters skills from inactive or unregistered plugins even if their skill switches remain on. The selected request inventory remains the evidence of what was offered.
 
 Plugin changes now show a compact deletion/addition diff above the original snapshots. Long diffs are marked as truncated; reopening old records also computes diffs.
