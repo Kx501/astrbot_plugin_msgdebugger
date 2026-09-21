@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import datetime
+import enum
 import functools
 import inspect
 import json
@@ -30,6 +32,8 @@ def snapshot(value: Any, depth: int = 0) -> Any:
     """
     if depth > 16:
         return "[truncated: nesting limit]"
+    if isinstance(value, enum.Enum):
+        return value.name
     if value is None or isinstance(value, (bool, int, float)):
         return value
     if isinstance(value, str):
@@ -63,6 +67,18 @@ def snapshot(value: Any, depth: int = 0) -> Any:
         if len(value) > 500:
             result.append("[truncated: list limit]")
         return result
+    if isinstance(value, (set, frozenset)):
+        items = sorted(value, key=repr)
+        result = [snapshot(item, depth + 1) for item in items[:500]]
+        if len(items) > 500:
+            result.append("[truncated: set limit]")
+        return result
+    if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
+        return value.isoformat()
+    if isinstance(value, (Path, uuid.UUID)):
+        return str(value)
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return f"[omitted: binary data, {len(value)} bytes]"
     if hasattr(value, "model_dump"):
         try:
             return snapshot(value.model_dump(mode="json"), depth + 1)

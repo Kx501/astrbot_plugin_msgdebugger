@@ -1,6 +1,8 @@
 """Focused observer contract tests using only the Python standard library."""
 
 import asyncio
+import datetime
+import enum
 import importlib
 import logging
 import sqlite3
@@ -8,6 +10,7 @@ import sys
 import tempfile
 import types
 import unittest
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -379,16 +382,31 @@ class StorageTests(unittest.TestCase):
             self.assertIsNone(store.error)
 
     def test_snapshots_are_bounded_and_redact_known_keys(self):
+        class State(enum.Enum):
+            READY = enum.auto()
+
         data = {
             "api_key": "secret",
             "nested": ["original"],
             "image": "data:image/png;base64,AAAA",
+            "enum": State.READY,
+            "date": datetime.date(2026, 9, 22),
+            "path": Path("skills/example"),
+            "uuid": uuid.UUID("00000000-0000-0000-0000-000000000001"),
+            "set": {"b", "a"},
+            "binary": b"abc",
         }
         captured = observer_module.snapshot(data)
         data["nested"][0] = "changed"
         self.assertEqual(captured["nested"], ["original"])
         self.assertEqual(captured["api_key"], "[redacted]")
         self.assertEqual(captured["image"], "[omitted: inline media]")
+        self.assertEqual(captured["enum"], "READY")
+        self.assertEqual(captured["date"], "2026-09-22")
+        self.assertEqual(captured["path"], str(Path("skills/example")))
+        self.assertEqual(captured["uuid"], "00000000-0000-0000-0000-000000000001")
+        self.assertEqual(captured["set"], ["a", "b"])
+        self.assertEqual(captured["binary"], "[omitted: binary data, 3 bytes]")
         cyclic = []
         cyclic.append(cyclic)
         self.assertIn("nesting limit", str(observer_module.snapshot(cyclic)))

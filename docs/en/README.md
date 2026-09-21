@@ -36,7 +36,7 @@ See the [Chinese README](../../README.md) for a complete integration example and
 
 Select a group or private contact in the sidebar, then open one message record. Group identity includes the platform instance; separate members in the same group share the group section. Unknown legacy identities remain grouped by their original session. Each group has a paginated record list.
 
-Start in Overview: it summarizes the trigger, observed model requests, tools and changing plugins. Logs are collapsed into preparation, individual requests, and reply/send segments. The same clickable flow stays above every tab. Input, tools and comparison retain the selected attempt; plugin changes and usage cover the whole record.
+Start in Overview: it summarizes the trigger, observed model requests, tools and changing plugins. Logs separate preparation, individual model requests, tool execution, agent output, pre-send processing, and send completion in observed order. A pre-send hook can occur during a sub-agent run and does not prove that the whole conversation has ended. The same clickable flow stays above every tab. Input, tools and comparison retain the selected attempt; plugin changes and usage cover the whole record.
 
 ![Guided conversation overview, using synthetic data](../images/conversation-overview.png)
 

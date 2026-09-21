@@ -26,8 +26,18 @@ export function buildJourney(trace) {
       if(req.attempt_id)attempt++;
       last={kind:'request',title:req.attempt_id?`请求 ${attempt+1}`:'请求快照缺失',attempt:req.attempt_id?attempt:null,request:req,stages:[]};
       blocks.push(last);
-    } else if(['llm_response','decorating','sent','echo_sent','echo_error'].includes(stage.key) && last?.kind!=='finish') {
-      last={kind:'finish',title:'回复与发送',stages:[]};blocks.push(last);
+    } else if(stage.key==='tool_start') {
+      last={kind:'tool',title:`工具执行 · ${dataOf(stage).tool?.name || '未知工具'}`,stages:[]};blocks.push(last);
+    } else if(stage.key==='tool_end' && last?.kind!=='tool') {
+      last={kind:'tool',title:`工具返回 · ${dataOf(stage).tool?.name || '未知工具'}`,stages:[]};blocks.push(last);
+    } else if(stage.key==='llm_response') {
+      last={kind:'output',title:'Agent 输出',stages:[]};blocks.push(last);
+    } else if(stage.key==='decorating' && last?.kind!=='decorate') {
+      last={kind:'decorate',title:'发送前处理',stages:[]};blocks.push(last);
+    } else if(stage.key==='sent') {
+      last={kind:'sent',title:'发送完成',stages:[]};blocks.push(last);
+    } else if(['echo_start','echo_sent','echo_error'].includes(stage.key) && last?.kind!=='echo') {
+      last={kind:'echo',title:'复读发送',stages:[]};blocks.push(last);
     } else if(!last) {
       last={kind:'prepare',title:'收到消息 → 准备输入',stages:[]};blocks.push(last);
     }
@@ -83,7 +93,7 @@ export function overviewView(trace,parent,open) {
       if(stage.key==='plugin_change') {
         if(!d.changed&&!d.error)continue;
         title=`插件 ${d.source || '未知'} · ${d.changed?'改动了 '+Object.keys(d.after||{}).filter(k=>JSON.stringify(d.before?.[k])!==JSON.stringify(d.after?.[k])).join('、'):'执行异常'}`;
-      } else title=({inbound:'收到原始消息',request_snapshot:'准备请求快照',model_request:'将输入交给模型',model_response:'收到模型响应',model_error:'模型请求异常',model_interrupted:'模型请求中断（未取得完整响应）',tool_start:'开始执行工具',tool_end:'收到工具结果',llm_response:'Agent 最终回复',decorating:'处理即将发送的消息',sent:'AstrBot 发出发送通知',echo_start:'开始复读',echo_sent:'主动复读返回',echo_error:'复读异常',extension:'插件补充报告'})[stage.key]||stage.key;
+      } else title=({inbound:'收到原始消息',request_snapshot:'准备请求快照',model_request:'将输入交给模型',model_response:'收到模型响应',model_error:'模型请求异常',model_interrupted:'模型请求中断（未取得完整响应）',tool_start:'开始执行工具',tool_end:'收到工具结果',llm_response:'Agent 输出',decorating:'处理即将发送的消息',sent:'AstrBot 发出发送通知',echo_start:'复读开始',echo_sent:'主动复读返回',echo_error:'复读异常',extension:'插件补充报告'})[stage.key]||stage.key;
       if(stage.key==='model_error' && d.error==='GeneratorExit' && stages.some(s=>s.key==='model_response' && dataOf(s).attempt_id===d.attempt_id)) title='响应返回后迭代器关闭';
       if(d.tool?.name) title+=` · ${d.tool.name}`;
       raw(`${stage.at || ''} ${title}`,Object.keys(d).length?d:stage.fields,detail);
@@ -99,7 +109,7 @@ export function inputView(trace,req,state,parent,rerender,open) {
   guide.ontoggle=()=>{state.guideOpen=guide.open;};
   guide.append(el('summary','第一次看 LLM 请求？先用一分钟理解角色、顺序与工具'));
   guide.append(el('p','页面里的“输入”和“输出”对应“发给模型的请求”和“模型返回的消息”，请求体按顺序主要看下面几项。'));
-  guide.append(el('p', 'messages：请求的主体，是有序的输入消息列表。下方列表有 50 项但只调用模型一次，历史内容会随请求再次发送。'));
+  guide.append(el('p', 'messages：请求的主体，是有序的输入消息列表。下方列表有几十条但只调用模型一次，历史内容会随请求再次发送。'));
   guide.append(el('p','role：决定这条消息由谁发出，一般有以下几种身份。'));
   for(const [role,description]of Object.entries(meanings))guide.append(el('p',`${role}：${description}`));
   guide.append(el('p','content：输入/输出消息的内容，通常是文本，也可能是 JSON、图片或其他结构；一个 content 下可以有多个内容块数组。'));
