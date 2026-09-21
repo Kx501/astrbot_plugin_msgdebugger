@@ -180,7 +180,7 @@ function plugins() {
     if(data.duration_ms!==undefined) box.append(el('small',`${data.duration_ms} ms`,'muted'));
     if(data.error) box.append(el('p',data.error,'bad'));
     if(data.changed) {
-      const diff=el('details');diff.open=true;
+      const diff=el('details');
       diff.append(el('summary','变化内容 · − 删除 / + 新增'));
       const pre=el('pre');diff.append(pre);box.append(diff);
       for(const line of data.diff?.lines || []) pre.append(el('span',line,'diff-line'+(line.startsWith('+')?' add':line.startsWith('-')?' remove':'')));

@@ -107,6 +107,8 @@ details { margin:4px 0; }
   .message-explorer { display:block; height:auto; }
   .message-directory { max-height:230px; border-right:0; border-bottom:1px solid var(--line); }
   .message-reader { max-height:65vh; }
+  .journey { -ms-overflow-style:none; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+  .journey::-webkit-scrollbar { display:none; }
 }
 /* Keep orientation visible while giving the reader most of the viewport. */
 .selection-heading { flex-wrap:wrap; }
