@@ -28,11 +28,11 @@ export function buildJourney(trace) {
       blocks.push(last);
     } else if(stage.key==='tool_start') {
       const data=dataOf(stage);
-      last={kind:'tool',title:`${data.agent_scope==='nested'?'子代理工具执行':'工具执行'} · ${data.tool?.name || '未知工具'}`,stages:[]};blocks.push(last);
+      last={kind:'tool',title:`${data.agent_scope==='nested'?'子代理工具':'工具'} · ${data.tool?.name || '未知工具'}`,stages:[]};blocks.push(last);
     } else if(stage.key==='tool_end' && last?.kind!=='tool') {
       const data=dataOf(stage);
-      const status=data.error?(data.agent_scope==='nested'?'子代理工具失败':'工具失败'):(data.agent_scope==='nested'?'子代理工具返回':'工具返回');
-      last={kind:'tool',title:`${status} · ${data.tool?.name || '未知工具'}`,stages:[]};blocks.push(last);
+      const scope=data.agent_scope==='nested'?'子代理工具':'工具';
+      last={kind:'tool',title:`${scope} · ${data.tool?.name || '未知工具'}`,stages:[]};blocks.push(last);
     } else if(stage.key==='llm_response') {
       last={kind:'output',title:'Agent 输出',stages:[]};blocks.push(last);
     } else if(stage.key==='decorating' && last?.kind!=='decorate') {
@@ -44,7 +44,6 @@ export function buildJourney(trace) {
     } else if(!last) {
       last={kind:'prepare',title:'收到消息 → 准备输入',stages:[]};blocks.push(last);
     }
-    if(stage.key==='tool_end'&&dataOf(stage).error&&last?.kind==='tool') last.title=`${dataOf(stage).agent_scope==='nested'?'子代理工具失败':'工具失败'} · ${dataOf(stage).tool?.name || '未知工具'}`;
     last.stages.push(stage);
   }
   return blocks;
@@ -75,7 +74,6 @@ export function overviewView(trace,parent,open) {
     const summary=el('summary');
     const parts=[];
     const changes=block.stages.filter(s=>s.key==='plugin_change'&&dataOf(s).changed);
-    const calls=block.stages.filter(s=>s.key==='tool_start').map(s=>dataOf(s).tool?.name || '未知工具');
     if(block.kind==='request') {
       const response=block.stages.find(s=>['model_response','model_error','model_interrupted'].includes(s.key));
       const d=dataOf(response);
@@ -86,7 +84,10 @@ export function overviewView(trace,parent,open) {
       else parts.push(response?'模型返回内容':'尚无响应记录');
     }
     if(changes.length)parts.push(`${changes.length} 次插件改动`);
-    if(calls.length)parts.push(`执行工具：${calls.join('、')}`);
+    if(block.kind==='tool') {
+      const ended=block.stages.find(s=>s.key==='tool_end');
+      parts.push(ended ? (dataOf(ended).error?'执行失败':'执行完成') : '执行中');
+    }
     summary.append(el('strong',block.title),el('span',parts.join(' · ') || `${block.stages.length} 个已观测阶段`,'muted'));
     detail.append(summary);parent.append(detail);
     if(block.kind==='request')button('查看这次请求的输入',()=>open('input',block.attempt),detail);
@@ -97,9 +98,9 @@ export function overviewView(trace,parent,open) {
       if(stage.key==='plugin_change') {
         if(!d.changed&&!d.error)continue;
         title=`插件 ${d.source || '未知'} · ${d.changed?'改动了 '+Object.keys(d.after||{}).filter(k=>JSON.stringify(d.before?.[k])!==JSON.stringify(d.after?.[k])).join('、'):'执行异常'}`;
-      } else title=({inbound:'收到原始消息',request_snapshot:'准备请求快照',model_request:'将输入交给模型',model_response:'收到模型响应',model_error:'模型请求异常',model_interrupted:'模型请求中断（未取得完整响应）',tool_start:'开始执行工具',tool_end:d.error?'工具执行失败':'收到工具结果',llm_response:'Agent 输出',decorating:'处理即将发送的消息',sent:'AstrBot 发出发送通知',echo_start:'复读开始',echo_sent:'主动复读返回',echo_error:'复读异常',extension:'插件补充报告'})[stage.key]||stage.key;
+      } else title=({inbound:'收到原始消息',request_snapshot:'准备请求快照',model_request:'将输入交给模型',model_response:'收到模型响应',model_error:'模型请求异常',model_interrupted:'模型请求中断（未取得完整响应）',tool_start:'工具参数',tool_end:d.error?'执行失败详情':'工具返回内容',llm_response:'Agent 输出',decorating:'处理即将发送的消息',sent:'AstrBot 发出发送通知',echo_start:'复读开始',echo_sent:'主动复读返回',echo_error:'复读异常',extension:'插件补充报告'})[stage.key]||stage.key;
       if(stage.key==='model_error' && d.error==='GeneratorExit' && stages.some(s=>s.key==='model_response' && dataOf(s).attempt_id===d.attempt_id)) title='响应返回后迭代器关闭';
-      if(d.tool?.name) title+=` · ${d.tool.name}`;
+      if(d.tool?.name && !['tool_start','tool_end'].includes(stage.key)) title+=` · ${d.tool.name}`;
       raw(`${stage.at || ''} ${title}`,Object.keys(d).length?d:stage.fields,detail);
     }
   }

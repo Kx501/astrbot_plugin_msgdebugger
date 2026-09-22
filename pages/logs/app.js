@@ -41,7 +41,7 @@ async function choose(id) {
   renderList(); render();
 }
 
-async function refresh() {
+async function refresh(updateSelected = false) {
   if (busy) return;
   busy = true;
   try {
@@ -50,8 +50,9 @@ async function refresh() {
     state.runtime = runtime;
     renderList();
     if (!state.trace && state.traces.length) await choose(state.traces[0].id);
-    // Keep expanded details and reading position stable. Refresh the selected record explicitly.
-    if (state.tab === 'settings') render();
+    else if (updateSelected && state.trace) await choose(state.trace.id);
+    // Automatic polling keeps expanded details and reading position stable.
+    else if (state.tab === 'settings') render();
     document.querySelector('#notice').textContent = runtime.storage_error || '';
   } catch (error) { document.querySelector('#notice').textContent = error.message; }
   finally { busy = false; }
@@ -356,7 +357,7 @@ function exportPreview() {
   button('返回',()=>render(),row);
 }
 
-document.querySelector('#refresh').onclick=refresh;
+document.querySelector('#refresh').onclick=()=>refresh(true);
 document.querySelector('#search').oninput=()=>{state.groupPages.clear();renderList();};
 render();
 try {
