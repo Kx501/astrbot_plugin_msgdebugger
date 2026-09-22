@@ -216,9 +216,35 @@ function tools() {
     raw('参数定义',tool.parameters,box);
   }
   raw('当前全部注册工具（实时目录）',state.inventory?.tools || [],content);
+  const executions=[];
+  const pending=new Map();
   for(const stage of (state.trace?.stages||[]).filter(s=>s.key==='tool_start'||s.key==='tool_end')) {
     const data=dataOf(stage);
-    raw(`${data.agent_scope==='nested'?'子代理 · ':''}${data.error?'工具失败':labels[stage.key]} · ${data.tool?.name || ''}`,data,content);
+    const key=`${data.agent_scope||'main'}\u0000${data.tool?.name||'未知工具'}`;
+    if(stage.key==='tool_start') {
+      const execution={name:data.tool?.name||'未知工具',scope:data.agent_scope||'main',start:data,end:null};
+      executions.push(execution);
+      if(!pending.has(key))pending.set(key,[]);
+      pending.get(key).push(execution);
+    } else {
+      const waiting=pending.get(key)?.find(item=>!item.end);
+      if(waiting)waiting.end=data;
+      else executions.push({name:data.tool?.name||'未知工具',scope:data.agent_scope||'main',start:null,end:data});
+    }
+  }
+  content.append(el('h2',`工具执行记录 · ${executions.length} 次`));
+  hint('一次调用合并显示开始与返回。同一主/子代理范围内的同名工具按观测顺序配对；“等待返回”也可能表示记录被截断或执行路径没有结束事件。',content);
+  if(!executions.length) hint('这条记录没有观测到实际工具执行。模型请求工具不等于工具已经运行。',content);
+  for(const execution of executions) {
+    const box=card(`${execution.scope==='nested'?'子代理':'主代理'} · ${execution.name}`,content);
+    box.className+=' tool-execution';
+    const status=execution.end?.error?'执行失败':execution.start&&execution.end?'执行完成':execution.start?'等待返回':'缺少开始记录';
+    box.append(el('span',status,'badge'));
+    const args=execution.start?.arguments??execution.end?.arguments;
+    if(args!==undefined)raw('调用参数',args,box);
+    if(execution.end?.error)box.append(el('p',execution.end.error,'bad'));
+    if(execution.end&&execution.end.result!==undefined)raw('工具返回',execution.end.result,box);
+    raw('采集证据',{start:execution.start,end:execution.end},box);
   }
   for(const error of state.inventory?.errors||[]) hint(error,content);
 }

@@ -77,6 +77,9 @@ for(const mode of ['unwrapped','envelope','error']) {
   assert.match(nodes.get('#content').textContent,/52 条输入消息/);
   await nodes.get('#tabs').children.find(n=>n.textContent==='工具').onclick();
   assert.match(nodes.get('#selection').textContent,/当前选中请求 2 \/ 2/);
+  const toolExecutions=descendants(nodes.get('#content')).filter(n=>String(n.className).includes('tool-execution'));
+  assert.equal(toolExecutions.length,1,'one start/end pair renders as one tool execution');
+  assert.match(toolExecutions[0].textContent,/主代理 · weather执行完成/);
   assert.ok(calls.includes('page/detail'));
   assert.ok(calls.includes('page/inventory'));
 }
