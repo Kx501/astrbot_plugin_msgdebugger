@@ -218,7 +218,7 @@ function tools() {
   raw('当前全部注册工具（实时目录）',state.inventory?.tools || [],content);
   for(const stage of (state.trace?.stages||[]).filter(s=>s.key==='tool_start'||s.key==='tool_end')) {
     const data=dataOf(stage);
-    raw(`${data.agent_scope==='nested'?'子代理 · ':''}${labels[stage.key]} · ${data.tool?.name || ''}`,data,content);
+    raw(`${data.agent_scope==='nested'?'子代理 · ':''}${data.error?'工具失败':labels[stage.key]} · ${data.tool?.name || ''}`,data,content);
   }
   for(const error of state.inventory?.errors||[]) hint(error,content);
 }

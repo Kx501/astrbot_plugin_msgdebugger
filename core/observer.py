@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import dataclasses
 import datetime
 import enum
@@ -169,6 +170,9 @@ class DebugObserver:
         self.record = record
         self.patches = []
         self.active = False
+        self.nested_tool_state = contextvars.ContextVar(
+            "msgdebugger_nested_tool_state", default=None
+        )
         self.coverage = {
             "handlers": False,
             "runner": False,
@@ -412,11 +416,13 @@ class DebugObserver:
         except Exception:
             logger.warning("MsgDebugger handler adapter unavailable", exc_info=True)
         try:
+            from astrbot.core.agent.hooks import BaseAgentRunHooks
             from astrbot.core.agent.runners.tool_loop_agent_runner import (
                 ToolLoopAgentRunner,
             )
 
             runner_original = ToolLoopAgentRunner._iter_llm_responses
+            function_tools_original = ToolLoopAgentRunner._handle_function_tools
 
             @functools.wraps(runner_original)
             async def responses(runner, *args, **kwargs):
@@ -517,9 +523,96 @@ class DebugObserver:
                             },
                         )
 
+            @functools.wraps(function_tools_original)
+            async def function_tools(runner, req, llm_response):
+                calls = {}
+                observation = {"current_call_id": None, "ended_ids": set()}
+                token = self.nested_tool_state.set(observation)
+                iterator = function_tools_original(runner, req, llm_response)
+                try:
+                    async for item in iterator:
+                        chain = getattr(item, "message_chain", None)
+                        chain_type = getattr(chain, "type", None)
+                        for component in getattr(chain, "chain", []) or []:
+                            data = getattr(component, "data", None)
+                            if not isinstance(data, dict):
+                                continue
+                            call_id = str(data.get("id", ""))
+                            if chain_type == "tool_call":
+                                observation["current_call_id"] = call_id
+                                calls[call_id] = {
+                                    "name": str(data.get("name", "")),
+                                    "arguments": snapshot(data.get("args")),
+                                }
+                            elif chain_type == "tool_call_result":
+                                result = str(data.get("result", ""))
+                                hooks = getattr(runner, "agent_hooks", None)
+                                uses_default_hooks = (
+                                    hooks is not None
+                                    and getattr(type(hooks), "on_tool_start", None)
+                                    is BaseAgentRunHooks.on_tool_start
+                                )
+                                if (
+                                    uses_default_hooks
+                                    and result.startswith("error:")
+                                    and call_id not in observation["ended_ids"]
+                                ):
+                                    call = calls.get(call_id, {})
+                                    tool = None
+                                    tool_set = getattr(req, "func_tool", None)
+                                    if tool_set and call.get("name"):
+                                        tool = tool_set.get_tool(call["name"])
+                                    event = getattr(
+                                        getattr(
+                                            getattr(runner, "run_context", None),
+                                            "context",
+                                            None,
+                                        ),
+                                        "event",
+                                        None,
+                                    )
+                                    self.emit(
+                                        event,
+                                        "tool_end",
+                                        {
+                                            "tool": tool_info(tool)
+                                            if tool
+                                            else {
+                                                "name": call.get("name") or "未知工具",
+                                                "source": "unresolved",
+                                            },
+                                            "arguments": call.get("arguments"),
+                                            "result": result,
+                                            "error": result.removeprefix(
+                                                "error:"
+                                            ).strip(),
+                                            "outcome": "error",
+                                            "evidence": "runner_tool_result",
+                                            "agent_scope": "nested",
+                                        },
+                                    )
+                        yield item
+                finally:
+                    await iterator.aclose()
+                    self.nested_tool_state.reset(token)
+
             ToolLoopAgentRunner._iter_llm_responses = responses
-            self.patches.append(
-                (ToolLoopAgentRunner, "_iter_llm_responses", runner_original, responses)
+            ToolLoopAgentRunner._handle_function_tools = function_tools
+            self.patches.extend(
+                (
+                    (
+                        ToolLoopAgentRunner,
+                        "_iter_llm_responses",
+                        runner_original,
+                        responses,
+                    ),
+                    (
+                        ToolLoopAgentRunner,
+                        "_handle_function_tools",
+                        function_tools_original,
+                        function_tools,
+                    ),
+                )
             )
             self.coverage["runner"] = True
         except Exception:
@@ -552,6 +645,9 @@ class DebugObserver:
 
             @functools.wraps(tool_end_original)
             async def nested_tool_end(hooks, run_context, tool, tool_args, tool_result):
+                observation = self.nested_tool_state.get()
+                if observation and observation.get("current_call_id"):
+                    observation["ended_ids"].add(observation["current_call_id"])
                 returned = await tool_end_original(
                     hooks, run_context, tool, tool_args, tool_result
                 )

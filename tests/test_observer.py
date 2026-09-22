@@ -244,6 +244,7 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.req = request()
                 self.provider = SimpleNamespace(provider_config={"id": "test"})
+                self.agent_hooks = BaseAgentRunHooks()
 
             def _func_tool_for_provider(self):
                 return None
@@ -257,10 +258,48 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
                     usage={"input_other": 10, "input_cached": 2, "output": 3}
                 )
 
+            async def _handle_function_tools(self, req, llm_response):
+                tool = req.func_tool.get_tool("failing_tool")
+                await self.agent_hooks.on_tool_start(
+                    self.run_context, tool, {"value": 1}
+                )
+                yield SimpleNamespace(
+                    message_chain=SimpleNamespace(
+                        type="tool_call",
+                        chain=[
+                            SimpleNamespace(
+                                data={
+                                    "id": "call-1",
+                                    "name": "failing_tool",
+                                    "args": {"value": 1},
+                                }
+                            )
+                        ],
+                    )
+                )
+                if getattr(llm_response, "emit_end", False):
+                    await self.agent_hooks.on_tool_end(
+                        self.run_context,
+                        tool,
+                        {"value": 1},
+                        {"text": "error: legitimate text"},
+                    )
+                yield SimpleNamespace(
+                    message_chain=SimpleNamespace(
+                        type="tool_call_result",
+                        chain=[
+                            SimpleNamespace(
+                                data={"id": "call-1", "result": "error: unavailable"}
+                            )
+                        ],
+                    )
+                )
+
         sys.modules[
             "astrbot.core.agent.runners.tool_loop_agent_runner"
         ].ToolLoopAgentRunner = Runner
         original = Runner._iter_llm_responses
+        original_function_tools = Runner._handle_function_tools
         original_tool_start = BaseAgentRunHooks.on_tool_start
         original_tool_end = BaseAgentRunHooks.on_tool_end
         self.observer.install()
@@ -284,6 +323,41 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(nested_records[0][2]["tool"]["name"], "random_image")
         self.assertEqual(nested_records[1][2]["result"], nested_result)
         self.assertEqual(nested_records[0][2]["agent_scope"], "nested")
+
+        failing_runner = Runner("nested_failure")
+        failing_tool = SimpleNamespace(
+            name="failing_tool",
+            description="Fail during execution",
+            parameters={"type": "object"},
+            active=True,
+            handler_module_path="plugin.alpha",
+        )
+        failing_request = SimpleNamespace(
+            func_tool=SimpleNamespace(get_tool=lambda name: failing_tool)
+        )
+        _ = [
+            item
+            async for item in failing_runner._handle_function_tools(
+                failing_request, SimpleNamespace()
+            )
+        ]
+        failure_records = [r for r in self.records if r[0] == "nested_failure"]
+        self.assertEqual([r[1] for r in failure_records], ["tool_start", "tool_end"])
+        self.assertEqual(failure_records[1][2]["outcome"], "error")
+        self.assertEqual(failure_records[1][2]["error"], "unavailable")
+
+        legitimate_runner = Runner("nested_legitimate_error_text")
+        _ = [
+            item
+            async for item in legitimate_runner._handle_function_tools(
+                failing_request, SimpleNamespace(emit_end=True)
+            )
+        ]
+        legitimate_records = [
+            r for r in self.records if r[0] == "nested_legitimate_error_text"
+        ]
+        self.assertEqual([r[1] for r in legitimate_records], ["tool_start", "tool_end"])
+        self.assertNotIn("error", legitimate_records[1][2])
 
         async def collect(name):
             return [item async for item in Runner(name)._iter_llm_responses()]
@@ -320,6 +394,7 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         )
         self.observer.uninstall()
         self.assertIs(Runner._iter_llm_responses, original)
+        self.assertIs(Runner._handle_function_tools, original_function_tools)
         self.assertIs(BaseAgentRunHooks.on_tool_start, original_tool_start)
         self.assertIs(BaseAgentRunHooks.on_tool_end, original_tool_end)
 
