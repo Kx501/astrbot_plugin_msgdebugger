@@ -206,17 +206,6 @@ function tools() {
   const names=new Set(called.map(c=>c.tool?.name));
   const hasRequest=!!current();
   const list=hasRequest?offered:(state.inventory?.tools||[]);
-  content.append(el('h2',hasRequest?`选中请求的工具快照 · ${offered.length} 个`:'当前注册工具'));
-  if(!list.length) hint(hasRequest?'这次请求没有提供工具。已注册工具仍可在下方实时目录中查看。':state.inventory?'没有可显示的工具。':'正在加载工具目录…',content);
-  for(const tool of list) {
-    const box=card(tool.name,content);
-    box.append(el('span',hasRequest?'本次提供':'当前注册','badge'));
-    if(names.has(tool.name)) box.append(el('span','本次对话已调用','badge'));
-    if(tool.active===false) box.append(el('span','未启用','badge'));
-    box.append(el('p',tool.description),el('small',`来源：${tool.source}`,'muted'));
-    raw('参数定义',tool.parameters,box);
-  }
-  raw('当前全部注册工具（实时目录）',state.inventory?.tools || [],content);
   const executions=[];
   const pending=new Map();
   for(const stage of (state.trace?.stages||[]).filter(s=>s.key==='tool_start'||s.key==='tool_end')) {
@@ -247,6 +236,17 @@ function tools() {
     if(execution.end&&execution.end.result!==undefined)raw('工具返回',execution.end.result,box);
     raw('采集证据',{start:execution.start,end:execution.end},box);
   }
+  content.append(el('h2',hasRequest?`选中请求的工具快照 · ${offered.length} 个`:'当前注册工具'));
+  if(!list.length) hint(hasRequest?'这次请求没有提供工具。已注册工具仍可在下方实时目录中查看。':state.inventory?'没有可显示的工具。':'正在加载工具目录…',content);
+  for(const tool of list) {
+    const box=card(tool.name,content);
+    box.append(el('span',hasRequest?'本次提供':'当前注册','badge'));
+    if(names.has(tool.name)) box.append(el('span','本次对话已调用','badge'));
+    if(tool.active===false) box.append(el('span','未启用','badge'));
+    box.append(el('p',tool.description),el('small',`来源：${tool.source}`,'muted'));
+    raw('参数定义',tool.parameters,box);
+  }
+  raw('当前全部注册工具（实时目录）',state.inventory?.tools || [],content);
   for(const error of state.inventory?.errors||[]) hint(error,content);
 }
 
